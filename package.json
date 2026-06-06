@@ -1,0 +1,10 @@
+{
+  "name": "publichealthmap-root",
+  "version": "1.0.0",
+  "description": "PublicHealthMap project root",
+  "scripts": {
+    "dev": "node run-dev.js",
+    "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+  },
+  "dependencies": {}
+}
