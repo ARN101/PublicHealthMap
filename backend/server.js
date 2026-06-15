@@ -189,6 +189,85 @@ app.post('/api/patients/register', async (req, res) => {
   }
 });
 
+// Step 10: Batch Case Submission executing PL/SQL stored procedure
+app.post('/api/cases/batch-submit', async (req, res) => {
+  const { cases } = req.body;
+
+  if (!cases || !Array.isArray(cases) || cases.length === 0) {
+    return res.status(400).json({ success: false, error: 'No cases provided in batch.' });
+  }
+
+  const size = cases.length;
+
+  // Extract arrays of values
+  const patientIds = cases.map(c => Number(c.patientId));
+  const hospitalIds = cases.map(c => Number(c.hospitalId));
+  const diseaseIds = cases.map(c => Number(c.diseaseId));
+  const diagDates = cases.map(c => c.diagnosisDate || '');
+  const symptoms = cases.map(c => c.symptomsList || '');
+  const severities = cases.map(c => c.severityAtAdmission || 'Mild');
+  const methods = cases.map(c => c.diagnosisMethod || 'Clinical');
+  const isolations = cases.map(c => c.isolationStatus || 'Home Isolation');
+  const sources = cases.map(c => c.infectionSource || 'Unknown');
+  const travels = cases.map(c => c.travelHistory || '');
+  const comorbidities = cases.map(c => c.coMorbidities || '');
+  const notes = cases.map(c => c.notes || '');
+
+  try {
+    const result = await executeQuery(
+      `BEGIN
+          case_entry_pkg.log_case_batch(
+              p_patient_ids => :patientIds,
+              p_hospital_ids => :hospitalIds,
+              p_disease_ids => :diseaseIds,
+              p_diag_dates => :diagDates,
+              p_symptoms => :symptoms,
+              p_severities => :severities,
+              p_methods => :methods,
+              p_isolations => :isolations,
+              p_sources => :sources,
+              p_travels => :travels,
+              p_comorbidities => :comorbidities,
+              p_notes => :notes,
+              p_size => :size,
+              p_success_count => :successCount,
+              p_fail_count => :failCount,
+              p_results => :results
+          );
+       END;`,
+      {
+        patientIds: { type: oracledb.DB_TYPE_NUMBER, dir: oracledb.BIND_IN, val: patientIds },
+        hospitalIds: { type: oracledb.DB_TYPE_NUMBER, dir: oracledb.BIND_IN, val: hospitalIds },
+        diseaseIds: { type: oracledb.DB_TYPE_NUMBER, dir: oracledb.BIND_IN, val: diseaseIds },
+        diagDates: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: diagDates },
+        symptoms: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: symptoms },
+        severities: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: severities },
+        methods: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: methods },
+        isolations: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: isolations },
+        sources: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: sources },
+        travels: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: travels },
+        comorbidities: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: comorbidities },
+        notes: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_IN, val: notes },
+        size: size,
+        successCount: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT },
+        failCount: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT },
+        results: { type: oracledb.DB_TYPE_VARCHAR, dir: oracledb.BIND_OUT, maxArraySize: size }
+      },
+      { autoCommit: true }
+    );
+
+    res.json({
+      success: true,
+      successCount: result.outBinds.successCount,
+      failCount: result.outBinds.failCount,
+      results: result.outBinds.results
+    });
+  } catch (err) {
+    console.error('Batch submit error:', err.message);
+    res.status(500).json({ success: false, error: `Batch processing failed: ${err.message}` });
+  }
+});
+
 // Start Server
 app.listen(PORT, '127.0.0.1', async () => {
   console.log(`Backend server running on http://127.0.0.1:${PORT}`);

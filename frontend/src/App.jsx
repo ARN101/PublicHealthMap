@@ -7,6 +7,26 @@ function App() {
   const [dbStatus, setDbStatus] = useState({ success: false, message: 'Database Untested', checked: false });
   const [checking, setChecking] = useState(false);
 
+  // Batch Case Logging states
+  const [hospitalSubView, setHospitalSubView] = useState('search'); // 'search' or 'batch'
+  const [batchHospitalId, setBatchHospitalId] = useState('1001');
+  const [batchCases, setBatchCases] = useState([
+    {
+      patientId: '',
+      diseaseId: '101',
+      diagnosisDate: new Date().toISOString().split('T')[0],
+      symptomsList: '',
+      severityAtAdmission: 'Mild',
+      diagnosisMethod: 'Clinical',
+      isolationStatus: 'Home Isolation',
+      infectionSource: 'Local Transmission',
+      notes: ''
+    }
+  ]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [batchResult, setBatchResult] = useState(null);
+  const [batchError, setBatchError] = useState('');
+
   // Patient Lookup states
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -188,6 +208,89 @@ function App() {
       })
       .finally(() => {
         setRegLoading(false);
+      });
+  };
+
+  // Add a new row to the batch
+  const handleAddBatchRow = () => {
+    setBatchCases([
+      ...batchCases,
+      {
+        patientId: '',
+        diseaseId: '101',
+        diagnosisDate: new Date().toISOString().split('T')[0],
+        symptomsList: '',
+        severityAtAdmission: 'Mild',
+        diagnosisMethod: 'Clinical',
+        isolationStatus: 'Home Isolation',
+        infectionSource: 'Local Transmission',
+        notes: ''
+      }
+    ]);
+  };
+
+  // Remove a row from the batch
+  const handleRemoveBatchRow = (index) => {
+    if (batchCases.length <= 1) return; // Keep at least one row
+    const newCases = [...batchCases];
+    newCases.splice(index, 1);
+    setBatchCases(newCases);
+  };
+
+  // Change input in a specific batch row
+  const handleBatchInputChange = (index, field, value) => {
+    const newCases = [...batchCases];
+    newCases[index] = { ...newCases[index], [field]: value };
+    setBatchCases(newCases);
+  };
+
+  // Submit the batch of cases
+  const handleBatchSubmit = (e) => {
+    e.preventDefault();
+    setBatchSubmitting(true);
+    setBatchError('');
+    setBatchResult(null);
+
+    // Quick client-side validation
+    const invalidRow = batchCases.findIndex(c => !c.patientId.trim() || isNaN(Number(c.patientId)));
+    if (invalidRow !== -1) {
+      setBatchError(`Row ${invalidRow + 1}: Patient ID is required and must be a number.`);
+      setBatchSubmitting(false);
+      return;
+    }
+
+    if (!batchHospitalId.trim() || isNaN(Number(batchHospitalId))) {
+      setBatchError('Operating Hospital ID is required and must be a number.');
+      setBatchSubmitting(false);
+      return;
+    }
+
+    const payload = {
+      cases: batchCases.map(c => ({
+        ...c,
+        hospitalId: Number(batchHospitalId)
+      }))
+    };
+
+    fetch('/api/cases/batch-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          setBatchResult(data);
+        } else {
+          setBatchError(data.error || 'Failed to submit batch cases.');
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        setBatchError('Network error submitting batch cases.');
+      })
+      .finally(() => {
+        setBatchSubmitting(false);
       });
   };
 
@@ -381,285 +484,552 @@ function App() {
               </div>
             </div>
 
-            {/* Patient Search Form */}
-            <section className="bg-white border border-gray-200 rounded p-6 mb-8">
-              <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">Lookup Patient</h3>
-              <p className="text-xs text-gray-400 mb-4">Search by National ID (NID) or Birth Certificate Number (BCN) before creating a clinical case record.</p>
-              
-              <form onSubmit={handleSearchPatient} className="flex gap-4">
-                <input
-                  type="text"
-                  placeholder="Enter NID or Birth Certificate Number"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="flex-grow border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-800"
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={searching || !searchQuery.trim()}
-                  className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2 px-6 rounded transition-colors"
-                >
-                  {searching ? 'Searching...' : 'Search Patient'}
-                </button>
-              </form>
+            {/* Sub-Navigation Tabs */}
+            <div className="flex gap-4 mb-6">
+              <button
+                onClick={() => {
+                  setHospitalSubView('search');
+                  setBatchResult(null);
+                  setBatchError('');
+                }}
+                className={`text-xs font-bold px-4 py-2 border rounded transition-all ${
+                  hospitalSubView === 'search'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Search & Intake Portal
+              </button>
+              <button
+                onClick={() => {
+                  setHospitalSubView('batch');
+                  setSearchResult(null);
+                  setSearchQuery('');
+                  setShowRegForm(false);
+                }}
+                className={`text-xs font-bold px-4 py-2 border rounded transition-all ${
+                  hospitalSubView === 'batch'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Batch Case Logging
+              </button>
+            </div>
 
-              {searchError && (
-                <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
-                  {searchError}
-                </div>
-              )}
-              {regSuccess && (
-                <div className="mt-4 p-3 bg-green-50 border border-green-200 text-green-800 rounded text-xs font-mono">
-                  {regSuccess}
-                </div>
-              )}
-            </section>
-
-            {/* SEARCH RESULTS DISPLAY */}
-            {searchResult && searchResult.found && (
-              <section className="bg-white border border-gray-200 rounded p-6 mb-8">
-                <div className="flex items-start justify-between border-b border-gray-100 pb-3 mb-4">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Patient Record Found</h3>
-                    <p className="text-xs text-gray-400 mt-1">Identified from the central database registry</p>
-                  </div>
-                  <span className="bg-green-100 border border-green-200 text-green-800 text-[10px] font-semibold font-mono uppercase px-2 py-0.5 rounded">
-                    Active File
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 text-sm">
-                  <div>
-                    <div className="text-xs text-gray-400">Full Name</div>
-                    <div className="text-gray-900 font-semibold">{searchResult.patient.fullName}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Patient Database ID</div>
-                    <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.patientId}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Date of Birth</div>
-                    <div className="text-gray-900 font-semibold">{searchResult.patient.dateOfBirth}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Gender</div>
-                    <div className="text-gray-900 font-semibold">{searchResult.patient.gender}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Blood Group</div>
-                    <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.bloodGroup}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Contact Number</div>
-                    <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.contactNumber}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400">Occupation</div>
-                    <div className="text-gray-900 font-semibold">{searchResult.patient.occupation || 'N/A'}</div>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <div className="text-xs text-gray-400">Address</div>
-                    <div className="text-gray-900 font-semibold">
-                      {searchResult.patient.streetAddress ? `${searchResult.patient.streetAddress}, ` : ''}
-                      {searchResult.patient.city}, {searchResult.patient.division}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Integration notice */}
-                <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded text-xs text-gray-500">
-                  <strong>Database verification</strong>: Connection handles are open. Stored procedure package <code>patient_reg_pkg.find_patient</code> executed successfully.
-                </div>
-              </section>
-            )}
-
-            {/* PATIENT REGISTRATION FORM (Triggered if not found) */}
-            {showRegForm && (
-              <section className="bg-white border border-gray-200 rounded p-6">
-                <div className="border-b border-gray-200 pb-3 mb-6">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Register New Patient</h3>
-                  <p className="text-xs text-red-500 mt-1">NJS-Lookup result: Patient identity not registered. You must create a new profile in the database.</p>
-                </div>
-
-                {regError && (
-                  <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
-                    {regError}
-                  </div>
-                )}
-
-                <form onSubmit={handleRegisterPatient} className="flex flex-col gap-6 text-sm">
+            {/* SUB-VIEW 1: SINGLE PATIENT SEARCH & REGISTRATION */}
+            {hospitalSubView === 'search' && (
+              <>
+                {/* Patient Search Form */}
+                <section className="bg-white border border-gray-200 rounded p-6 mb-8">
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">Lookup Patient</h3>
+                  <p className="text-xs text-gray-400 mb-4">Search by National ID (NID) or Birth Certificate Number (BCN) before creating a clinical case record.</p>
                   
-                  {/* Identity Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">National ID</label>
-                      <input
-                        type="text"
-                        name="nationalId"
-                        value={formData.nationalId}
-                        onChange={handleInputChange}
-                        placeholder="NID Number (if available)"
-                        className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Birth Certificate Number</label>
-                      <input
-                        type="text"
-                        name="birthCertNo"
-                        value={formData.birthCertNo}
-                        onChange={handleInputChange}
-                        placeholder="BCN (if available)"
-                        className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Core Profile Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Full Name *</label>
-                      <input
-                        type="text"
-                        name="fullName"
-                        value={formData.fullName}
-                        onChange={handleInputChange}
-                        placeholder="Patient Full Name"
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Date of Birth *</label>
-                      <input
-                        type="date"
-                        name="dob"
-                        value={formData.dob}
-                        onChange={handleInputChange}
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Gender *</label>
-                      <select
-                        name="gender"
-                        value={formData.gender}
-                        onChange={handleInputChange}
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
-                      >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Demographics Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Blood Group *</label>
-                      <select
-                        name="bloodGroup"
-                        value={formData.bloodGroup}
-                        onChange={handleInputChange}
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
-                      >
-                        <option value="A+">A+</option>
-                        <option value="A-">A-</option>
-                        <option value="B+">B+</option>
-                        <option value="B-">B-</option>
-                        <option value="AB+">AB+</option>
-                        <option value="AB-">AB-</option>
-                        <option value="O+">O+</option>
-                        <option value="O-">O-</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Contact Number *</label>
-                      <input
-                        type="text"
-                        name="contactNumber"
-                        value={formData.contactNumber}
-                        onChange={handleInputChange}
-                        placeholder="Mobile or Landline"
-                        className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Occupation</label>
-                      <input
-                        type="text"
-                        name="occupation"
-                        value={formData.occupation}
-                        onChange={handleInputChange}
-                        placeholder="Patient Profession"
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Location Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Street Address</label>
-                      <input
-                        type="text"
-                        name="streetAddress"
-                        value={formData.streetAddress}
-                        onChange={handleInputChange}
-                        placeholder="House / Road Number"
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">City *</label>
-                      <input
-                        type="text"
-                        name="city"
-                        value={formData.city}
-                        onChange={handleInputChange}
-                        placeholder="Town / City"
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Division *</label>
-                      <input
-                        type="text"
-                        name="division"
-                        value={formData.division}
-                        onChange={handleInputChange}
-                        placeholder="State / Division (e.g. Dhaka)"
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/* Submit buttons */}
-                  <div className="flex gap-4 border-t border-gray-100 pt-4 mt-2">
+                  <form onSubmit={handleSearchPatient} className="flex gap-4">
+                    <input
+                      type="text"
+                      placeholder="Enter NID or Birth Certificate Number"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="flex-grow border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-800"
+                      required
+                    />
                     <button
                       type="submit"
-                      disabled={regLoading}
+                      disabled={searching || !searchQuery.trim()}
+                      className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2 px-6 rounded transition-colors"
+                    >
+                      {searching ? 'Searching...' : 'Search Patient'}
+                    </button>
+                  </form>
+
+                  {searchError && (
+                    <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
+                      {searchError}
+                    </div>
+                  )}
+                  {regSuccess && (
+                    <div className="mt-4 p-3 bg-green-50 border border-green-200 text-green-800 rounded text-xs font-mono">
+                      {regSuccess}
+                    </div>
+                  )}
+                </section>
+
+                {/* SEARCH RESULTS DISPLAY */}
+                {searchResult && searchResult.found && (
+                  <section className="bg-white border border-gray-200 rounded p-6 mb-8">
+                    <div className="flex items-start justify-between border-b border-gray-100 pb-3 mb-4">
+                      <div>
+                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Patient Record Found</h3>
+                        <p className="text-xs text-gray-400 mt-1">Identified from the central database registry</p>
+                      </div>
+                      <span className="bg-green-100 border border-green-200 text-green-800 text-[10px] font-semibold font-mono uppercase px-2 py-0.5 rounded">
+                        Active File
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 text-sm">
+                      <div>
+                        <div className="text-xs text-gray-400">Full Name</div>
+                        <div className="text-gray-900 font-semibold">{searchResult.patient.fullName}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-400">Patient Database ID</div>
+                        <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.patientId}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-400">Date of Birth</div>
+                        <div className="text-gray-900 font-semibold">{searchResult.patient.dateOfBirth}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-400">Gender</div>
+                        <div className="text-gray-900 font-semibold">{searchResult.patient.gender}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-400">Blood Group</div>
+                        <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.bloodGroup}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-400">Contact Number</div>
+                        <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.contactNumber}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-400">Occupation</div>
+                        <div className="text-gray-900 font-semibold">{searchResult.patient.occupation || 'N/A'}</div>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <div className="text-xs text-gray-400">Address</div>
+                        <div className="text-gray-900 font-semibold">
+                          {searchResult.patient.streetAddress ? `${searchResult.patient.streetAddress}, ` : ''}
+                          {searchResult.patient.city}, {searchResult.patient.division}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Integration notice */}
+                    <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded text-xs text-gray-500">
+                      <strong>Database verification</strong>: Connection handles are open. Stored procedure package <code>patient_reg_pkg.find_patient</code> executed successfully.
+                    </div>
+                  </section>
+                )}
+
+                {/* PATIENT REGISTRATION FORM (Triggered if not found) */}
+                {showRegForm && (
+                  <section className="bg-white border border-gray-200 rounded p-6">
+                    <div className="border-b border-gray-200 pb-3 mb-6">
+                      <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Register New Patient</h3>
+                      <p className="text-xs text-red-500 mt-1">NJS-Lookup result: Patient identity not registered. You must create a new profile in the database.</p>
+                    </div>
+
+                    {regError && (
+                      <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
+                        {regError}
+                      </div>
+                    )}
+
+                    <form onSubmit={handleRegisterPatient} className="flex flex-col gap-6 text-sm">
+                      
+                      {/* Identity Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">National ID</label>
+                          <input
+                            type="text"
+                            name="nationalId"
+                            value={formData.nationalId}
+                            onChange={handleInputChange}
+                            placeholder="NID Number (if available)"
+                            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Birth Certificate Number</label>
+                          <input
+                            type="text"
+                            name="birthCertNo"
+                            value={formData.birthCertNo}
+                            onChange={handleInputChange}
+                            placeholder="BCN (if available)"
+                            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Core Profile Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Full Name *</label>
+                          <input
+                            type="text"
+                            name="fullName"
+                            value={formData.fullName}
+                            onChange={handleInputChange}
+                            placeholder="Patient Full Name"
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Date of Birth *</label>
+                          <input
+                            type="date"
+                            name="dob"
+                            value={formData.dob}
+                            onChange={handleInputChange}
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Gender *</label>
+                          <select
+                            name="gender"
+                            value={formData.gender}
+                            onChange={handleInputChange}
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
+                          >
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Demographics Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Blood Group *</label>
+                          <select
+                            name="bloodGroup"
+                            value={formData.bloodGroup}
+                            onChange={handleInputChange}
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
+                          >
+                            <option value="A+">A+</option>
+                            <option value="A-">A-</option>
+                            <option value="B+">B+</option>
+                            <option value="B-">B-</option>
+                            <option value="AB+">AB+</option>
+                            <option value="AB-">AB-</option>
+                            <option value="O+">O+</option>
+                            <option value="O-">O-</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Contact Number *</label>
+                          <input
+                            type="text"
+                            name="contactNumber"
+                            value={formData.contactNumber}
+                            onChange={handleInputChange}
+                            placeholder="Mobile or Landline"
+                            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Occupation</label>
+                          <input
+                            type="text"
+                            name="occupation"
+                            value={formData.occupation}
+                            onChange={handleInputChange}
+                            placeholder="Patient Profession"
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Location Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Street Address</label>
+                          <input
+                            type="text"
+                            name="streetAddress"
+                            value={formData.streetAddress}
+                            onChange={handleInputChange}
+                            placeholder="House / Road Number"
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">City *</label>
+                          <input
+                            type="text"
+                            name="city"
+                            value={formData.city}
+                            onChange={handleInputChange}
+                            placeholder="Town / City"
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Division *</label>
+                          <input
+                            type="text"
+                            name="division"
+                            value={formData.division}
+                            onChange={handleInputChange}
+                            placeholder="State / Division (e.g. Dhaka)"
+                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Submit buttons */}
+                      <div className="flex gap-4 border-t border-gray-100 pt-4 mt-2">
+                        <button
+                          type="submit"
+                          disabled={regLoading}
+                          className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2.5 px-8 rounded transition-colors"
+                        >
+                          {regLoading ? 'Registering...' : 'Register Patient'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowRegForm(false)}
+                          className="border border-gray-300 text-gray-600 text-xs font-semibold py-2.5 px-6 rounded bg-white hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                    </form>
+                  </section>
+                )}
+              </>
+            )}
+
+            {/* SUB-VIEW 2: BATCH CASE LOGGING */}
+            {hospitalSubView === 'batch' && (
+              <div className="flex flex-col gap-6">
+                
+                {/* Batch Header & Config */}
+                <section className="bg-white border border-gray-200 rounded p-6">
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-2">Batch Outbreak Logger</h3>
+                  <p className="text-xs text-gray-400 mb-6 font-sans">Record multiple case files simultaneously inside a single transaction context utilizing PL/SQL Savepoint boundaries.</p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-sm">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Operating Hospital ID *</label>
+                      <input
+                        type="text"
+                        value={batchHospitalId}
+                        onChange={(e) => setBatchHospitalId(e.target.value)}
+                        className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-slate-800"
+                        required
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                {/* Batch Form Table */}
+                <form onSubmit={handleBatchSubmit} className="bg-white border border-gray-200 rounded p-6 overflow-x-auto">
+                  <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4 min-w-[700px]">
+                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Case Registry Records</h3>
+                    <button
+                      type="button"
+                      onClick={handleAddBatchRow}
+                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-1.5 px-3 rounded"
+                    >
+                      + Add Row
+                    </button>
+                  </div>
+
+                  {batchError && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
+                      {batchError}
+                    </div>
+                  )}
+
+                  {batchResult && (
+                    <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded text-xs font-sans">
+                      <div className="font-bold text-gray-800 mb-2">Batch Log Summary (Transaction Complete):</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-mono mb-4 text-[11px]">
+                        <div>Successfully Written: <span className="text-green-700 font-bold">{batchResult.successCount}</span></div>
+                        <div>Savepoint Rolled Back: <span className="text-red-700 font-bold">{batchResult.failCount}</span></div>
+                      </div>
+                      <div className="border-t border-gray-200 pt-3">
+                        <div className="font-semibold text-gray-700 mb-1">Details per Row:</div>
+                        <ul className="list-disc pl-5 font-mono text-[11px] text-gray-600 flex flex-col gap-1">
+                          {batchResult.results.map((res, i) => (
+                            <li key={i}>
+                              Row {i + 1}: <span className={res.startsWith('SUCCESS') ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>{res}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  <table className="w-full text-left border-collapse min-w-[900px] text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase tracking-wider text-[10px]">
+                        <th className="py-2 pr-2">Patient ID *</th>
+                        <th className="py-2 px-2">Disease *</th>
+                        <th className="py-2 px-2">Diag Date *</th>
+                        <th className="py-2 px-2">Symptoms List *</th>
+                        <th className="py-2 px-2">Severity</th>
+                        <th className="py-2 px-2">Method</th>
+                        <th className="py-2 px-2">Isolation</th>
+                        <th className="py-2 px-2">Source</th>
+                        <th className="py-2 px-2">Notes</th>
+                        <th className="py-2 pl-2 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 font-sans">
+                      {batchCases.map((c, idx) => (
+                        <tr key={idx}>
+                          <td className="py-3 pr-2">
+                            <input
+                              type="text"
+                              placeholder="Patient ID"
+                              value={c.patientId}
+                              onChange={(e) => handleBatchInputChange(idx, 'patientId', e.target.value)}
+                              className="w-20 border border-gray-300 rounded px-1.5 py-1 text-xs font-mono focus:outline-none"
+                              required
+                            />
+                          </td>
+                          <td className="py-3 px-2">
+                            <select
+                              value={c.diseaseId}
+                              onChange={(e) => handleBatchInputChange(idx, 'diseaseId', e.target.value)}
+                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
+                            >
+                              <option value="101">COVID-19</option>
+                              <option value="102">Cholera</option>
+                              <option value="103">Dengue</option>
+                              <option value="104">Tuberculosis</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-2">
+                            <input
+                              type="date"
+                              value={c.diagnosisDate}
+                              onChange={(e) => handleBatchInputChange(idx, 'diagnosisDate', e.target.value)}
+                              className="w-28 border border-gray-300 rounded px-1 py-1 font-mono focus:outline-none"
+                              required
+                            />
+                          </td>
+                          <td className="py-3 px-2">
+                            <input
+                              type="text"
+                              placeholder="Symptoms list"
+                              value={c.symptomsList}
+                              onChange={(e) => handleBatchInputChange(idx, 'symptomsList', e.target.value)}
+                              className="w-32 border border-gray-300 rounded px-2 py-1 focus:outline-none"
+                              required
+                            />
+                          </td>
+                          <td className="py-3 px-2">
+                            <select
+                              value={c.severityAtAdmission}
+                              onChange={(e) => handleBatchInputChange(idx, 'severityAtAdmission', e.target.value)}
+                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
+                            >
+                              <option value="Mild">Mild</option>
+                              <option value="Moderate">Moderate</option>
+                              <option value="Severe">Severe</option>
+                              <option value="Critical">Critical</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-2">
+                            <select
+                              value={c.diagnosisMethod}
+                              onChange={(e) => handleBatchInputChange(idx, 'diagnosisMethod', e.target.value)}
+                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
+                            >
+                              <option value="PCR">PCR</option>
+                              <option value="Antigen">Antigen</option>
+                              <option value="Clinical">Clinical</option>
+                              <option value="Culture">Culture</option>
+                              <option value="Imaging">Imaging</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-2">
+                            <select
+                              value={c.isolationStatus}
+                              onChange={(e) => handleBatchInputChange(idx, 'isolationStatus', e.target.value)}
+                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
+                            >
+                              <option value="Home Isolation">Home Isolation</option>
+                              <option value="General Ward">General Ward</option>
+                              <option value="ICU">ICU</option>
+                              <option value="CCU">CCU</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-2">
+                            <select
+                              value={c.infectionSource}
+                              onChange={(e) => handleBatchInputChange(idx, 'infectionSource', e.target.value)}
+                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
+                            >
+                              <option value="Local Transmission">Local Transmission</option>
+                              <option value="Imported">Imported</option>
+                              <option value="Unknown">Unknown</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-2">
+                            <input
+                              type="text"
+                              placeholder="Notes"
+                              value={c.notes}
+                              onChange={(e) => handleBatchInputChange(idx, 'notes', e.target.value)}
+                              className="w-24 border border-gray-300 rounded px-1.5 py-1 focus:outline-none"
+                            />
+                          </td>
+                          <td className="py-3 pl-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveBatchRow(idx)}
+                              disabled={batchCases.length <= 1}
+                              className="text-red-500 hover:text-red-700 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div className="flex gap-4 border-t border-gray-100 pt-4 mt-6">
+                    <button
+                      type="submit"
+                      disabled={batchSubmitting}
                       className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2.5 px-8 rounded transition-colors"
                     >
-                      {regLoading ? 'Registering...' : 'Register Patient'}
+                      {batchSubmitting ? 'Logging Batch...' : 'Submit Batch Case Log'}
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowRegForm(false)}
+                      onClick={() => {
+                        setBatchCases([
+                          {
+                            patientId: '',
+                            diseaseId: '101',
+                            diagnosisDate: new Date().toISOString().split('T')[0],
+                            symptomsList: '',
+                            severityAtAdmission: 'Mild',
+                            diagnosisMethod: 'Clinical',
+                            isolationStatus: 'Home Isolation',
+                            infectionSource: 'Local Transmission',
+                            notes: ''
+                          }
+                        ]);
+                        setBatchResult(null);
+                        setBatchError('');
+                      }}
                       className="border border-gray-300 text-gray-600 text-xs font-semibold py-2.5 px-6 rounded bg-white hover:bg-gray-50"
                     >
-                      Cancel
+                      Reset Form
                     </button>
                   </div>
-
                 </form>
-              </section>
+              </div>
             )}
 
           </main>
