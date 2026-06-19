@@ -268,6 +268,77 @@ app.post('/api/cases/batch-submit', async (req, res) => {
   }
 });
 
+// Step 12: Public API Endpoint to fetch aggregated outbreak statistics
+app.get('/api/public/stats', async (req, res) => {
+  try {
+    const result = await executeQuery(
+      `SELECT division, disease_code, active_cases, total_cases, total_deaths, last_updated 
+       FROM DIVISIONAL_STATS_SUMMARY 
+       ORDER BY division, disease_code`
+    );
+    
+    const stats = result.rows.map(row => ({
+      division: row.DIVISION,
+      diseaseCode: row.DISEASE_CODE,
+      activeCases: Number(row.ACTIVE_CASES),
+      totalCases: Number(row.TOTAL_CASES),
+      totalDeaths: Number(row.TOTAL_DEATHS),
+      lastUpdated: row.LAST_UPDATED
+    }));
+
+    res.json({ success: true, stats });
+  } catch (err) {
+    console.error('Fetch public stats error:', err.message);
+    res.status(500).json({ success: false, error: `Could not retrieve public statistics: ${err.message}` });
+  }
+});
+
+// Dictionary of geographic coordinates for Bangladesh divisions
+const DIVISION_COORDINATES = {
+  'Dhaka': { lat: 23.8103, lng: 90.4125 },
+  'Chittagong': { lat: 22.3569, lng: 91.7832 },
+  'Chattogram': { lat: 22.3569, lng: 91.7832 },
+  'Rajshahi': { lat: 24.3745, lng: 88.6042 },
+  'Khulna': { lat: 22.8456, lng: 89.5403 },
+  'Barisal': { lat: 22.7010, lng: 90.3535 },
+  'Barishal': { lat: 22.7010, lng: 90.3535 },
+  'Sylhet': { lat: 24.8949, lng: 91.8687 },
+  'Rangpur': { lat: 25.7508, lng: 89.2467 },
+  'Mymensingh': { lat: 24.7471, lng: 90.4203 }
+};
+
+// Step 12: Public API Endpoint to fetch map boundary indicators
+app.get('/api/public/map-data', async (req, res) => {
+  try {
+    const result = await executeQuery(
+      `SELECT division, 
+              SUM(active_cases) AS active_cases, 
+              SUM(total_cases) AS total_cases, 
+              SUM(total_deaths) AS total_deaths
+       FROM DIVISIONAL_STATS_SUMMARY 
+       GROUP BY division`
+    );
+
+    const mapData = result.rows.map(row => {
+      const divName = row.DIVISION;
+      const coords = DIVISION_COORDINATES[divName] || { lat: 23.6850, lng: 90.3563 };
+      return {
+        division: divName,
+        lat: coords.lat,
+        lng: coords.lng,
+        activeCases: Number(row.ACTIVE_CASES),
+        totalCases: Number(row.TOTAL_CASES),
+        totalDeaths: Number(row.TOTAL_DEATHS)
+      };
+    });
+
+    res.json({ success: true, mapData });
+  } catch (err) {
+    console.error('Fetch map data error:', err.message);
+    res.status(500).json({ success: false, error: `Could not retrieve map indicators: ${err.message}` });
+  }
+});
+
 // Start Server
 app.listen(PORT, '127.0.0.1', async () => {
   console.log(`Backend server running on http://127.0.0.1:${PORT}`);
@@ -275,6 +346,24 @@ app.listen(PORT, '127.0.0.1', async () => {
   // Proactively attempt connection pool initialization on startup
   try {
     await initializeDb();
+
+    // Compile background stats immediately on startup
+    console.log('Compiling initial database outbreak statistics...');
+    await executeQuery('BEGIN refresh_disease_stats; END;');
+    console.log('Database statistics updated successfully.');
+
+    // Configure 5-minute background stats refresh timer
+    const REFRESH_INTERVAL = 5 * 60 * 1000;
+    setInterval(async () => {
+      console.log('Scheduler: Refreshing outbreak statistics...');
+      try {
+        await executeQuery('BEGIN refresh_disease_stats; END;');
+        console.log('Scheduler: Outbreak statistics refreshed.');
+      } catch (err) {
+        console.error('Scheduler Error: Failed to execute refresh_disease_stats:', err.message);
+      }
+    }, REFRESH_INTERVAL);
+
   } catch (err) {
     console.warn('\n[WARNING] Local Oracle DB not connected on startup. Verify credentials in backend/.env and start your local Oracle service.\n');
   }
