@@ -1,5 +1,173 @@
 import React, { useState, useEffect } from 'react';
 
+// SvgBarChart Component - minimalist, dependency-free bar plotting
+function SvgBarChart({ data }) {
+  if (!data || data.length === 0) return <div className="text-xs text-gray-400 font-mono py-8 text-center bg-gray-50 border border-dashed rounded">No case records available to plot.</div>;
+
+  // Aggregate total cases by disease code
+  const aggregated = {};
+  data.forEach(item => {
+    if (item.totalCases > 0) {
+      aggregated[item.diseaseCode] = (aggregated[item.diseaseCode] || 0) + item.totalCases;
+    }
+  });
+
+  const chartData = Object.entries(aggregated).map(([key, val]) => ({ name: key, value: val }));
+  if (chartData.length === 0) return <div className="text-xs text-gray-400 font-mono py-8 text-center bg-gray-50 border border-dashed rounded">No registered disease cases to plot.</div>;
+
+  const width = 450;
+  const height = 280;
+  const paddingLeft = 50;
+  const paddingRight = 20;
+  const paddingTop = 30;
+  const paddingBottom = 40;
+
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  const maxValue = Math.max(...chartData.map(d => d.value), 5);
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto bg-white border border-gray-200 rounded p-2">
+      {/* Grid Lines */}
+      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+        const y = paddingTop + chartHeight * (1 - ratio);
+        const val = Math.round(maxValue * ratio);
+        return (
+          <g key={i} className="opacity-60">
+            <line x1={paddingLeft} y1={y} x2={width - paddingRight} y2={y} stroke="#f1f5f9" strokeDasharray="3 3" />
+            <text x={paddingLeft - 10} y={y + 4} className="text-[10px] font-mono text-gray-400 text-right" textAnchor="end">{val}</text>
+          </g>
+        );
+      })}
+
+      {/* Bars */}
+      {chartData.map((d, i) => {
+        const barWidth = Math.max(20, (chartWidth / chartData.length) - 20);
+        const x = paddingLeft + i * (chartWidth / chartData.length) + 10;
+        const barHeight = (d.value / maxValue) * chartHeight;
+        const y = paddingTop + chartHeight - barHeight;
+
+        return (
+          <g key={i}>
+            <rect
+              x={x}
+              y={y}
+              width={barWidth}
+              height={barHeight}
+              fill="#334155" // Slate-700
+              className="hover:fill-slate-800 transition-colors duration-150"
+            />
+            {/* Value Label */}
+            <text
+              x={x + barWidth / 2}
+              y={y - 8}
+              textAnchor="middle"
+              className="text-[10px] font-mono font-bold fill-slate-800"
+            >
+              {d.value}
+            </text>
+            {/* Axis Label */}
+            <text
+              x={x + barWidth / 2}
+              y={height - paddingBottom + 16}
+              textAnchor="middle"
+              className="text-[10px] font-mono font-semibold fill-slate-500"
+            >
+              {d.name}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Axis Lines */}
+      <line x1={paddingLeft} y1={paddingTop + chartHeight} x2={width - paddingRight} y2={paddingTop + chartHeight} stroke="#cbd5e1" strokeWidth="1" />
+      <line x1={paddingLeft} y1={paddingTop} x2={paddingLeft} y2={paddingTop + chartHeight} stroke="#cbd5e1" strokeWidth="1" />
+    </svg>
+  );
+}
+
+// ProjectedBubbleMap - displays geographic outbreak bubbles mapped by lat/lng
+function ProjectedBubbleMap({ data }) {
+  const width = 350;
+  const height = 400;
+
+  // Projected boundary bounds for Bangladesh
+  const minLng = 88.0;
+  const maxLng = 92.8;
+  const minLat = 20.5;
+  const maxLat = 26.8;
+
+  const project = (lat, lng) => {
+    const x = ((lng - minLng) / (maxLng - minLng)) * width;
+    const y = (1 - (lat - minLat) / (maxLat - minLat)) * height;
+    return { x, y };
+  };
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto bg-slate-50 border border-gray-200 rounded relative">
+      {/* Bangladesh Map Polygon Outline */}
+      <polygon
+        points="110,60 210,50 250,55 290,140 280,210 320,300 270,370 200,380 130,340 140,240 85,180 75,90"
+        fill="#ffffff"
+        stroke="#e2e8f0"
+        strokeWidth="2.5"
+      />
+      
+      {/* Grid Lines */}
+      <line x1={width/2} y1={0} x2={width/2} y2={height} stroke="#e2e8f0" strokeDasharray="4 4" className="opacity-40" />
+      <line x1={0} y1={height/2} x2={width} y2={height/2} stroke="#e2e8f0" strokeDasharray="4 4" className="opacity-40" />
+
+      {data.map((div, i) => {
+        const { x, y } = project(div.lat, div.lng);
+        // Circle size is proportional to total cases
+        const radius = Math.max(6, Math.min(22, 6 + (div.totalCases * 1.5)));
+
+        return (
+          <g key={i} className="group">
+            {/* Active outbreak notification pulse */}
+            {div.activeCases > 0 && (
+              <circle
+                cx={x}
+                cy={y}
+                r={radius + 5}
+                fill="none"
+                stroke="#dc2626" // Red-600
+                strokeWidth="1.5"
+                className="animate-ping opacity-75"
+              />
+            )}
+            {/* Main bubble */}
+            <circle
+              cx={x}
+              cy={y}
+              r={radius}
+              fill={div.totalCases > 0 ? '#475569' : '#e2e8f0'} // Slate-600 or slate-200
+              stroke="#1e293b" // Slate-800
+              strokeWidth="1.5"
+              className="hover:fill-slate-800 transition-colors duration-150"
+            />
+            {/* Legend label */}
+            <text
+              x={x}
+              y={y - radius - 6}
+              textAnchor="middle"
+              className="text-[9px] font-mono font-bold fill-slate-700 bg-white"
+            >
+              {div.division} ({div.totalCases})
+            </text>
+            
+            {/* Hover Tooltip */}
+            <title>
+              {`${div.division} Division\nTotal Cases: ${div.totalCases}\nActive Cases: ${div.activeCases}\nDeaths: ${div.totalDeaths}`}
+            </title>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function App() {
   // Navigation and Greeting states
   const [currentView, setCurrentView] = useState('home'); // 'home' or 'hospital'
@@ -53,6 +221,42 @@ function App() {
     division: '',
     photoUrl: ''
   });
+
+  // Analytics states
+  const [statsData, setStatsData] = useState([]);
+  const [mapData, setMapData] = useState([]);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState('');
+
+  const loadAnalytics = () => {
+    setLoadingAnalytics(true);
+    setAnalyticsError('');
+    Promise.all([
+      fetch('/api/public/stats').then(res => res.json()),
+      fetch('/api/public/map-data').then(res => res.json())
+    ])
+      .then(([statsRes, mapRes]) => {
+        if (statsRes.success && mapRes.success) {
+          setStatsData(statsRes.stats);
+          setMapData(mapRes.mapData);
+        } else {
+          setAnalyticsError('Failed to fetch public outbreak statistics.');
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        setAnalyticsError('Error connecting to public analytics endpoints.');
+      })
+      .finally(() => {
+        setLoadingAnalytics(false);
+      });
+  };
+
+  useEffect(() => {
+    if (currentView === 'home') {
+      loadAnalytics();
+    }
+  }, [currentView]);
 
   // Load backend hello on mount
   useEffect(() => {
@@ -409,6 +613,90 @@ function App() {
                 </div>
 
               </div>
+
+              {/* Analytics Dashboard Panel */}
+              <section className="mt-12 bg-white border border-gray-200 rounded p-6">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-6">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
+                      Live Epidemic Outbreak Analytics
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">Aggregated statistics compiled database-side via cursor aggregates</p>
+                  </div>
+                  <button
+                    onClick={loadAnalytics}
+                    disabled={loadingAnalytics}
+                    className="bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 text-xs font-semibold py-1.5 px-3 rounded transition-colors"
+                  >
+                    {loadingAnalytics ? 'Refreshing...' : 'Refresh Stats'}
+                  </button>
+                </div>
+
+                {analyticsError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono mb-6">
+                    {analyticsError}
+                  </div>
+                )}
+
+                {loadingAnalytics && (
+                  <div className="text-center py-12 text-xs text-gray-400 font-mono">
+                    Loading live database analytics...
+                  </div>
+                )}
+
+                {!loadingAnalytics && !analyticsError && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                    
+                    {/* Left Column: Geographic Outline Map */}
+                    <div className="flex flex-col gap-4">
+                      <div className="text-xs font-bold text-gray-600 uppercase tracking-wider">Geographic Bubble Map (Bangladesh)</div>
+                      <ProjectedBubbleMap data={mapData} />
+                      <div className="text-[10px] text-gray-400 italic font-mono">Bubbles are projected based on division coordinates; size indicates case volume.</div>
+                    </div>
+
+                    {/* Right Column: Disease Outbreak Bar Chart */}
+                    <div className="flex flex-col gap-4">
+                      <div className="text-xs font-bold text-gray-600 uppercase tracking-wider">Case Volume by Disease</div>
+                      <SvgBarChart data={statsData} />
+                      <div className="text-[10px] text-gray-400 italic font-mono">Total cases registered in system database per disease profile.</div>
+                    </div>
+
+                  </div>
+                )}
+
+                {/* Aggregated Details Table */}
+                {!loadingAnalytics && !analyticsError && statsData.length > 0 && (
+                  <div className="mt-8 overflow-x-auto border-t border-gray-100 pt-6">
+                    <div className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-4">Outbreak Records Index</div>
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase text-[10px]">
+                          <th className="py-2 pr-4">Division</th>
+                          <th className="py-2 px-4">Disease</th>
+                          <th className="py-2 px-4 text-right">Active Cases</th>
+                          <th className="py-2 px-4 text-right">Total Cases</th>
+                          <th className="py-2 px-4 text-right">Total Deaths</th>
+                          <th className="py-2 pl-4 text-right">Last Synchronized</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 font-mono">
+                        {statsData.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="py-2 pr-4 font-sans font-semibold text-gray-900">{row.division}</td>
+                            <td className="py-2 px-4 text-slate-700">{row.diseaseCode}</td>
+                            <td className="py-2 px-4 text-right font-medium text-red-600">{row.activeCases}</td>
+                            <td className="py-2 px-4 text-right font-medium text-slate-800">{row.totalCases}</td>
+                            <td className="py-2 px-4 text-right font-medium text-gray-700">{row.totalDeaths}</td>
+                            <td className="py-2 pl-4 text-right text-[10px] text-gray-400">
+                              {row.lastUpdated ? new Date(row.lastUpdated).toLocaleString() : 'N/A'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
 
               {/* Database Proof Panel */}
               <section className="mt-12 bg-white border border-gray-200 rounded p-6">
