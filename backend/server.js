@@ -339,6 +339,76 @@ app.get('/api/public/map-data', async (req, res) => {
   }
 });
 
+// Step 15: Secure Researcher Data Export Pipeline
+app.get('/api/research/export', async (req, res) => {
+  let conn;
+  try {
+    const { diseaseCode, division, startDate, endDate } = req.query;
+
+    const pool = await initializeDb();
+    conn = await pool.getConnection();
+
+    const result = await conn.execute(
+      `BEGIN
+         research_data_pkg.get_anonymized_cases(
+             p_disease_code => :diseaseCode,
+             p_division => :division,
+             p_start_date => :startDate,
+             p_end_date => :endDate,
+             p_cursor => :cursor
+         );
+       END;`,
+      {
+        diseaseCode: diseaseCode || null,
+        division: division || null,
+        startDate: startDate || null,
+        endDate: endDate || null,
+        cursor: { type: oracledb.CURSOR, dir: oracledb.BIND_OUT }
+      }
+    );
+
+    const cursor = result.outBinds.cursor;
+    const rows = [];
+    let row;
+
+    while ((row = await cursor.getRow())) {
+      rows.push({
+        patientHash: row.PATIENT_HASH,
+        patientAge: row.PATIENT_AGE,
+        gender: row.GENDER,
+        bloodGroup: row.BLOOD_GROUP,
+        city: row.CITY,
+        division: row.DIVISION,
+        diseaseCode: row.DISEASE_CODE,
+        diseaseName: row.DISEASE_NAME,
+        diagnosisDate: row.DIAGNOSIS_DATE,
+        symptoms: row.SYMPTOMS_LIST,
+        severity: row.SEVERITY_AT_ADMISSION,
+        patientStatus: row.PATIENT_STATUS
+      });
+    }
+    await cursor.close();
+
+    // Set headers to trigger file download
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="anonymized_outbreak_data.json"');
+    
+    res.send(JSON.stringify(rows, null, 2));
+
+  } catch (err) {
+    console.error('Research export error:', err.message);
+    res.status(500).json({ success: false, error: `Export pipeline failed: ${err.message}` });
+  } finally {
+    if (conn) {
+      try {
+        await conn.close();
+      } catch (err) {
+        console.error('Connection close error in export:', err.message);
+      }
+    }
+  }
+});
+
 // Start Server
 app.listen(PORT, '127.0.0.1', async () => {
   console.log(`Backend server running on http://127.0.0.1:${PORT}`);

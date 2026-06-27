@@ -222,6 +222,19 @@ function App() {
     photoUrl: ''
   });
 
+  // Researcher Export states
+  const [showResearcherExport, setShowResearcherExport] = useState(false);
+  const [exportDisease, setExportDisease] = useState('');
+  const [exportDivision, setExportDivision] = useState('');
+
+  const handleDownloadExport = () => {
+    let queryParams = [];
+    if (exportDisease) queryParams.push(`diseaseCode=${encodeURIComponent(exportDisease)}`);
+    if (exportDivision) queryParams.push(`division=${encodeURIComponent(exportDivision)}`);
+    const queryString = queryParams.length > 0 ? '?' + queryParams.join('&') : '';
+    window.open(`/api/research/export${queryString}`, '_blank');
+  };
+
   // Analytics states
   const [statsData, setStatsData] = useState([]);
   const [mapData, setMapData] = useState([]);
@@ -603,13 +616,71 @@ function App() {
                   <div>
                     <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 font-mono">Research Access</div>
                     <h3 className="text-lg font-bold text-gray-900 mb-3">Anonymized Export</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">
+                    <p className="text-sm text-gray-500 leading-relaxed mb-4">
                       Approved medical and research organizations can request datasets. Data is masked at the database level using PL/SQL hash routines for HIPAA compliance.
                     </p>
+
+                    {showResearcherExport && (
+                      <div className="space-y-3 pt-3 border-t border-gray-100">
+                        <div>
+                          <label className="block text-[10px] uppercase font-mono tracking-wider font-bold text-gray-500 mb-1">Filter Disease</label>
+                          <select
+                            value={exportDisease}
+                            onChange={(e) => setExportDisease(e.target.value)}
+                            className="w-full text-xs bg-slate-50 border border-gray-200 rounded p-1.5 font-mono"
+                          >
+                            <option value="">All Diseases</option>
+                            <option value="COVID19">COVID-19 (COVID19)</option>
+                            <option value="CHOLERA">Cholera (CHOLERA)</option>
+                            <option value="DENGUE">Dengue (DENGUE)</option>
+                            <option value="TB">Tuberculosis (TB)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-mono tracking-wider font-bold text-gray-500 mb-1">Filter Division</label>
+                          <select
+                            value={exportDivision}
+                            onChange={(e) => setExportDivision(e.target.value)}
+                            className="w-full text-xs bg-slate-50 border border-gray-200 rounded p-1.5 font-mono"
+                          >
+                            <option value="">All Divisions</option>
+                            <option value="Dhaka">Dhaka</option>
+                            <option value="Chittagong">Chittagong</option>
+                            <option value="Rajshahi">Rajshahi</option>
+                            <option value="Khulna">Khulna</option>
+                            <option value="Barisal">Barisal</option>
+                            <option value="Sylhet">Sylhet</option>
+                            <option value="Rangpur">Rangpur</option>
+                            <option value="Mymensingh">Mymensingh</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <button className="mt-6 w-full bg-slate-950 text-white font-medium text-xs py-2 px-4 rounded cursor-not-allowed opacity-40">
-                    Secure Data Request
-                  </button>
+
+                  {!showResearcherExport ? (
+                    <button
+                      onClick={() => setShowResearcherExport(true)}
+                      className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs py-2 px-4 rounded transition-colors text-center"
+                    >
+                      Configure Export
+                    </button>
+                  ) : (
+                    <div className="mt-4 space-y-2">
+                      <button
+                        onClick={handleDownloadExport}
+                        className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs py-2 px-4 rounded transition-colors text-center"
+                      >
+                        Download Dataset (.json)
+                      </button>
+                      <button
+                        onClick={() => setShowResearcherExport(false)}
+                        className="w-full bg-white hover:bg-gray-50 border border-gray-200 text-gray-500 font-medium text-[10px] py-1.5 px-4 rounded transition-colors text-center font-mono"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
                 </div>
 
               </div>
