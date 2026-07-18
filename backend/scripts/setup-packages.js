@@ -106,6 +106,31 @@ CREATE OR REPLACE PACKAGE BODY patient_reg_pkg AS
             raise_application_error(-20101, 'Identity Error: Either National ID or Birth Certificate Number must be provided.');
         END IF;
 
+        -- 1b. National ID: digits only, length 11
+        IF p_national_id IS NOT NULL THEN
+            IF NOT REGEXP_LIKE(p_national_id, '^[0-9]+$') THEN
+                raise_application_error(-20105, 'Validation Error: National ID must contain digits only.');
+            END IF;
+            IF LENGTH(p_national_id) != 11 THEN
+                raise_application_error(-20106, 'Validation Error: National ID must be exactly 11 digits.');
+            END IF;
+        END IF;
+
+        -- 1c. Birth Certificate: digits only, length 17
+        IF p_birth_cert_no IS NOT NULL THEN
+            IF NOT REGEXP_LIKE(p_birth_cert_no, '^[0-9]+$') THEN
+                raise_application_error(-20107, 'Validation Error: Birth Certificate Number must contain digits only.');
+            END IF;
+            IF LENGTH(p_birth_cert_no) <> 17 THEN
+                raise_application_error(-20108, 'Validation Error: Birth Certificate Number must be exactly 17 digits.');
+            END IF;
+        END IF;
+
+        -- 1d. Contact: BD mobile 01[3-9]XXXXXXXX
+        IF p_contact_number IS NULL OR NOT REGEXP_LIKE(p_contact_number, '^01[3-9][0-9]{8}$') THEN
+            raise_application_error(-20109, 'Validation Error: Contact number must be a valid BD mobile (11 digits, 013-019...).');
+        END IF;
+
         -- 2. Validate Gender
         IF p_gender NOT IN ('Male', 'Female', 'Other') THEN
             raise_application_error(-20102, 'Validation Error: Invalid value for Gender. Must be Male, Female, or Other.');
@@ -158,7 +183,8 @@ async function runSetup() {
 
     // 3. Test Package Call (DML requires connection to verify transaction commits)
     console.log('\nTesting PL/SQL package procedures...');
-    const testNid = '9999888877776';
+    const testNid = '99998888777'; // 11-digit NID for package smoke test
+
     
     // We get connection from pool manually to perform a transactional PL/SQL execution
     const pool = await initializeDb();
@@ -191,7 +217,7 @@ async function runSetup() {
           dob: '1995-04-12',
           gender: 'Female',
           blood: 'O-',
-          phone: '+8801999999999',
+          phone: '01999999999',
           occupation: 'Engineer',
           address: 'Mirpur DOHS',
           city: 'Dhaka',

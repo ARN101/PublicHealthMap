@@ -125,7 +125,7 @@ async function runSetup() {
     try {
       // Create test resources
       console.log('Setting up temporary test patient and hospital...');
-      const patientNid = '9999000033333';
+      const patientNid = '99990000333';
       const hospLicense = 'TEST-BATCH-LIC';
 
       // Clean up previous test runs if any

@@ -1,6 +1,7 @@
 const { executeQuery, initializeDb } = require('../db');
 
 const dropQueries = [
+  'DROP TABLE PENDING_IMAGE_UPLOADS CASCADE CONSTRAINTS',
   'DROP TABLE DOWNLOAD_LOGS CASCADE CONSTRAINTS',
   'DROP TABLE RESEARCH_ORGANIZATIONS CASCADE CONSTRAINTS',
   'DROP TABLE CASE_RECORDS CASCADE CONSTRAINTS',
@@ -24,10 +25,12 @@ const createQueries = [
       division        VARCHAR2(100) NOT NULL,
       latitude        NUMBER(9,6) NOT NULL,
       longitude       NUMBER(9,6) NOT NULL,
+      approval_status VARCHAR2(20) DEFAULT 'Pending' NOT NULL,
       registered_at   DATE DEFAULT SYSDATE,
       CONSTRAINT pk_hospitals PRIMARY KEY (hospital_id),
       CONSTRAINT uk_hospital_license UNIQUE (license_number),
-      CONSTRAINT uk_hospital_email UNIQUE (email)
+      CONSTRAINT uk_hospital_email UNIQUE (email),
+      CONSTRAINT chk_hospital_approval CHECK (approval_status IN ('Pending', 'Approved', 'Rejected'))
   )`,
 
   // Table: PATIENTS
@@ -53,19 +56,30 @@ const createQueries = [
       CONSTRAINT chk_patient_identity CHECK (national_id IS NOT NULL OR birth_cert_no IS NOT NULL)
   )`,
 
-  // Table: DISEASES
+  // Table: DISEASES (central critical-disease registry — not epidemic-only)
   `CREATE TABLE DISEASES (
       disease_id        NUMBER,
-      disease_code      VARCHAR2(20) NOT NULL,
+      disease_code      VARCHAR2(40) NOT NULL,
       common_name       VARCHAR2(100) NOT NULL,
       scientific_name   VARCHAR2(150),
       severity_level    VARCHAR2(20) NOT NULL,
       transmission_mode VARCHAR2(50) NOT NULL,
       description       VARCHAR2(1000),
+      category          VARCHAR2(50) NOT NULL,
+      subcategory       VARCHAR2(80),
+      sample_image_url     VARCHAR2(500),
+      sample_image_caption VARCHAR2(200),
+      sample_image         BLOB,
+      sample_image_mime    VARCHAR2(100),
+      is_active         CHAR(1) DEFAULT 'Y' NOT NULL,
       CONSTRAINT pk_diseases PRIMARY KEY (disease_id),
       CONSTRAINT uk_disease_code UNIQUE (disease_code),
       CONSTRAINT chk_disease_severity CHECK (severity_level IN ('Mild', 'Moderate', 'Severe')),
-      CONSTRAINT chk_disease_transmission CHECK (transmission_mode IN ('Airborne', 'Waterborne', 'Vector', 'Contact', 'Zoonotic'))
+      CONSTRAINT chk_disease_transmission CHECK (transmission_mode IN (
+        'Airborne', 'Waterborne', 'Vector', 'Contact', 'Zoonotic',
+        'Non-communicable', 'Genetic', 'Lifestyle', 'Idiopathic'
+      )),
+      CONSTRAINT chk_disease_active CHECK (is_active IN ('Y', 'N'))
   )`,
 
   // Table: CASE_RECORDS
@@ -84,6 +98,9 @@ const createQueries = [
       co_morbidities        VARCHAR2(500),
       travel_history        VARCHAR2(500),
       notes                 VARCHAR2(1000),
+      affected_part_image_url VARCHAR2(500),
+      affected_part_image      BLOB,
+      affected_part_image_mime VARCHAR2(100),
       updated_at            DATE DEFAULT SYSDATE,
       CONSTRAINT pk_case_records PRIMARY KEY (case_id),
       CONSTRAINT fk_cases_patient FOREIGN KEY (patient_id) REFERENCES PATIENTS(patient_id),
@@ -131,6 +148,17 @@ const createQueries = [
       total_deaths      NUMBER DEFAULT 0 NOT NULL,
       last_updated      DATE DEFAULT SYSDATE,
       CONSTRAINT pk_div_stats PRIMARY KEY (division, disease_code)
+  )`,
+
+  // Staging table for hospital image uploads before case submit (BLOB storage)
+  `CREATE TABLE PENDING_IMAGE_UPLOADS (
+      upload_id   NUMBER,
+      hospital_id NUMBER NOT NULL,
+      image_blob  BLOB NOT NULL,
+      mime_type   VARCHAR2(100) NOT NULL,
+      created_at  DATE DEFAULT SYSDATE,
+      CONSTRAINT pk_pending_uploads PRIMARY KEY (upload_id),
+      CONSTRAINT fk_pending_hospital FOREIGN KEY (hospital_id) REFERENCES HOSPITALS(hospital_id)
   )`
 ];
 
@@ -166,6 +194,28 @@ async function runSetup() {
       } catch (err) {
         console.error(`Failed to create table ${tableName}:`, err.message);
         throw err;
+      }
+    }
+
+    // Create lookup/performance indexes defined in the proposal
+    const indexQueries = [
+      'CREATE INDEX idx_patients_nid ON PATIENTS(national_id)',
+      'CREATE INDEX idx_patients_bcn ON PATIENTS(birth_cert_no)',
+      'CREATE INDEX idx_cases_date_dis ON CASE_RECORDS(disease_id, diagnosis_date)',
+      'CREATE INDEX idx_patients_location ON PATIENTS(division, city)'
+    ];
+    console.log('\nCreating indexes...');
+    for (const q of indexQueries) {
+      const indexName = q.split(' ')[2];
+      try {
+        await executeQuery(q);
+        console.log(`Successfully created index: ${indexName}`);
+      } catch (err) {
+        if (err.message.includes('ORA-00955') || err.message.includes('ORA-01408')) {
+          console.log(`Index ${indexName} already covered/exists. Skipping.`);
+        } else {
+          throw err;
+        }
       }
     }
 

@@ -68,7 +68,7 @@ async function runSetup() {
 
     try {
       console.log('\nSetting up test patient data for stats validation...');
-      const testNid = '9999000044444';
+      const testNid = '99990000444';
       const hospLicense = 'TEST-STATS-LIC';
 
       // Clean up previous runs

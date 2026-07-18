@@ -1,1409 +1,638 @@
-import React, { useState, useEffect } from 'react';
-
-// SvgBarChart Component - minimalist, dependency-free bar plotting
-function SvgBarChart({ data }) {
-  if (!data || data.length === 0) return <div className="text-xs text-gray-400 font-mono py-8 text-center bg-gray-50 border border-dashed rounded">No case records available to plot.</div>;
-
-  // Aggregate total cases by disease code
-  const aggregated = {};
-  data.forEach(item => {
-    if (item.totalCases > 0) {
-      aggregated[item.diseaseCode] = (aggregated[item.diseaseCode] || 0) + item.totalCases;
-    }
-  });
-
-  const chartData = Object.entries(aggregated).map(([key, val]) => ({ name: key, value: val }));
-  if (chartData.length === 0) return <div className="text-xs text-gray-400 font-mono py-8 text-center bg-gray-50 border border-dashed rounded">No registered disease cases to plot.</div>;
-
-  const width = 450;
-  const height = 280;
-  const paddingLeft = 50;
-  const paddingRight = 20;
-  const paddingTop = 30;
-  const paddingBottom = 40;
-
-  const chartWidth = width - paddingLeft - paddingRight;
-  const chartHeight = height - paddingTop - paddingBottom;
-
-  const maxValue = Math.max(...chartData.map(d => d.value), 5);
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto bg-white border border-gray-200 rounded p-2">
-      {/* Grid Lines */}
-      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-        const y = paddingTop + chartHeight * (1 - ratio);
-        const val = Math.round(maxValue * ratio);
-        return (
-          <g key={i} className="opacity-60">
-            <line x1={paddingLeft} y1={y} x2={width - paddingRight} y2={y} stroke="#f1f5f9" strokeDasharray="3 3" />
-            <text x={paddingLeft - 10} y={y + 4} className="text-[10px] font-mono text-gray-400 text-right" textAnchor="end">{val}</text>
-          </g>
-        );
-      })}
-
-      {/* Bars */}
-      {chartData.map((d, i) => {
-        const barWidth = Math.max(20, (chartWidth / chartData.length) - 20);
-        const x = paddingLeft + i * (chartWidth / chartData.length) + 10;
-        const barHeight = (d.value / maxValue) * chartHeight;
-        const y = paddingTop + chartHeight - barHeight;
-
-        return (
-          <g key={i}>
-            <rect
-              x={x}
-              y={y}
-              width={barWidth}
-              height={barHeight}
-              fill="#334155" // Slate-700
-              className="hover:fill-slate-800 transition-colors duration-150"
-            />
-            {/* Value Label */}
-            <text
-              x={x + barWidth / 2}
-              y={y - 8}
-              textAnchor="middle"
-              className="text-[10px] font-mono font-bold fill-slate-800"
-            >
-              {d.value}
-            </text>
-            {/* Axis Label */}
-            <text
-              x={x + barWidth / 2}
-              y={height - paddingBottom + 16}
-              textAnchor="middle"
-              className="text-[10px] font-mono font-semibold fill-slate-500"
-            >
-              {d.name}
-            </text>
-          </g>
-        );
-      })}
-
-      {/* Axis Lines */}
-      <line x1={paddingLeft} y1={paddingTop + chartHeight} x2={width - paddingRight} y2={paddingTop + chartHeight} stroke="#cbd5e1" strokeWidth="1" />
-      <line x1={paddingLeft} y1={paddingTop} x2={paddingLeft} y2={paddingTop + chartHeight} stroke="#cbd5e1" strokeWidth="1" />
-    </svg>
-  );
-}
-
-// ProjectedBubbleMap - displays geographic outbreak bubbles mapped by lat/lng
-function ProjectedBubbleMap({ data }) {
-  const width = 350;
-  const height = 400;
-
-  // Projected boundary bounds for Bangladesh
-  const minLng = 88.0;
-  const maxLng = 92.8;
-  const minLat = 20.5;
-  const maxLat = 26.8;
-
-  const project = (lat, lng) => {
-    const x = ((lng - minLng) / (maxLng - minLng)) * width;
-    const y = (1 - (lat - minLat) / (maxLat - minLat)) * height;
-    return { x, y };
-  };
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto bg-slate-50 border border-gray-200 rounded relative">
-      {/* Bangladesh Map Polygon Outline */}
-      <polygon
-        points="110,60 210,50 250,55 290,140 280,210 320,300 270,370 200,380 130,340 140,240 85,180 75,90"
-        fill="#ffffff"
-        stroke="#e2e8f0"
-        strokeWidth="2.5"
-      />
-      
-      {/* Grid Lines */}
-      <line x1={width/2} y1={0} x2={width/2} y2={height} stroke="#e2e8f0" strokeDasharray="4 4" className="opacity-40" />
-      <line x1={0} y1={height/2} x2={width} y2={height/2} stroke="#e2e8f0" strokeDasharray="4 4" className="opacity-40" />
-
-      {data.map((div, i) => {
-        const { x, y } = project(div.lat, div.lng);
-        // Circle size is proportional to total cases
-        const radius = Math.max(6, Math.min(22, 6 + (div.totalCases * 1.5)));
-
-        return (
-          <g key={i} className="group">
-            {/* Active outbreak notification pulse */}
-            {div.activeCases > 0 && (
-              <circle
-                cx={x}
-                cy={y}
-                r={radius + 5}
-                fill="none"
-                stroke="#dc2626" // Red-600
-                strokeWidth="1.5"
-                className="animate-ping opacity-75"
-              />
-            )}
-            {/* Main bubble */}
-            <circle
-              cx={x}
-              cy={y}
-              r={radius}
-              fill={div.totalCases > 0 ? '#475569' : '#e2e8f0'} // Slate-600 or slate-200
-              stroke="#1e293b" // Slate-800
-              strokeWidth="1.5"
-              className="hover:fill-slate-800 transition-colors duration-150"
-            />
-            {/* Legend label */}
-            <text
-              x={x}
-              y={y - radius - 6}
-              textAnchor="middle"
-              className="text-[9px] font-mono font-bold fill-slate-700 bg-white"
-            >
-              {div.division} ({div.totalCases})
-            </text>
-            
-            {/* Hover Tooltip */}
-            <title>
-              {`${div.division} Division\nTotal Cases: ${div.totalCases}\nActive Cases: ${div.activeCases}\nDeaths: ${div.totalDeaths}`}
-            </title>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
+import React, { useEffect, useMemo, useState } from 'react';
+import { SvgBarChart, SvgPieChart, ProjectedBubbleMap } from './components/Charts';
+import MultiSelect from './components/MultiSelect';
+import { BD_DIVISIONS, NAV_ITEMS } from './lib/constants';
+import { authHeaders, loadSession, saveSession } from './lib/session';
+import HospitalPortal from './pages/HospitalPortal';
+import AdminPortal from './pages/AdminPortal';
+import ResearcherPortal from './pages/ResearcherPortal';
 
 function App() {
-  // Navigation and Greeting states
-  const [currentView, setCurrentView] = useState('home'); // 'home' or 'hospital'
-  const [helloMessage, setHelloMessage] = useState('Loading...');
-  const [dbStatus, setDbStatus] = useState({ success: false, message: 'Database Untested', checked: false });
-  const [checking, setChecking] = useState(false);
+  const [view, setView] = useState('landing');
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  // Batch Case Logging states
-  const [hospitalSubView, setHospitalSubView] = useState('search'); // 'search' or 'batch'
-  const [batchHospitalId, setBatchHospitalId] = useState('1001');
-  const [batchCases, setBatchCases] = useState([
-    {
-      patientId: '',
-      diseaseId: '101',
-      diagnosisDate: new Date().toISOString().split('T')[0],
-      symptomsList: '',
-      severityAtAdmission: 'Mild',
-      diagnosisMethod: 'Clinical',
-      isolationStatus: 'Home Isolation',
-      infectionSource: 'Local Transmission',
-      notes: ''
-    }
-  ]);
-  const [batchSubmitting, setBatchSubmitting] = useState(false);
-  const [batchResult, setBatchResult] = useState(null);
-  const [batchError, setBatchError] = useState('');
+  const [hospitalSession, setHospitalSession] = useState(() => loadSession('phm_hospital_session'));
+  const [researcherSession, setResearcherSession] = useState(() => loadSession('phm_researcher_session'));
+  const [adminSession, setAdminSession] = useState(() => loadSession('phm_admin_session'));
 
-  // Patient Lookup states
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchResult, setSearchResult] = useState(null); // { found: boolean, patient?: object }
-  const [searchError, setSearchError] = useState('');
+  const persistHospital = (s) => { setHospitalSession(s); saveSession('phm_hospital_session', s); };
+  const persistResearcher = (s) => { setResearcherSession(s); saveSession('phm_researcher_session', s); };
+  const persistAdmin = (s) => { setAdminSession(s); saveSession('phm_admin_session', s); };
 
-  // Registration Form states
-  const [showRegForm, setShowRegForm] = useState(false);
-  const [regError, setRegError] = useState('');
-  const [regSuccess, setRegSuccess] = useState('');
-  const [regLoading, setRegLoading] = useState(false);
-
-  const [formData, setFormData] = useState({
-    nationalId: '',
-    birthCertNo: '',
-    fullName: '',
-    dob: '',
-    gender: 'Male',
-    bloodGroup: 'A+',
-    contactNumber: '',
-    occupation: '',
-    streetAddress: '',
-    city: '',
-    division: '',
-    photoUrl: ''
-  });
-
-  // Researcher Export states
-  const [showResearcherExport, setShowResearcherExport] = useState(false);
-  const [exportDisease, setExportDisease] = useState('');
-  const [exportDivision, setExportDivision] = useState('');
-
-  const handleDownloadExport = () => {
-    let queryParams = [];
-    if (exportDisease) queryParams.push(`diseaseCode=${encodeURIComponent(exportDisease)}`);
-    if (exportDivision) queryParams.push(`division=${encodeURIComponent(exportDivision)}`);
-    const queryString = queryParams.length > 0 ? '?' + queryParams.join('&') : '';
-    window.open(`/api/research/export${queryString}`, '_blank');
+  const go = (id) => {
+    setView(id);
+    setMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Analytics states
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+      <header className="bg-white/95 backdrop-blur border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3">
+          <button type="button" onClick={() => go('landing')} className="text-left min-w-0">
+            <div className="font-display text-lg sm:text-xl font-bold text-slate-950 tracking-tight">PublicHealthMap</div>
+            <div className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">Bangladesh · Ministry of Health &amp; Family Welfare</div>
+          </button>
+
+          <nav className="hidden md:flex items-center gap-1.5">
+            {[
+              { id: 'landing', label: 'Home' },
+              { id: 'surveillance', label: 'Surveillance' }
+            ].map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => go(item.id)}
+                className={`px-3.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  view === item.id
+                    ? 'bg-brand text-white shadow-sm'
+                    : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="relative">
+            <button
+              type="button"
+              aria-label="Open site menu"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="w-10 h-10 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 flex flex-col items-center justify-center gap-1"
+            >
+              <span className="w-1 h-1 rounded-full bg-slate-800" />
+              <span className="w-1 h-1 rounded-full bg-slate-800" />
+              <span className="w-1 h-1 rounded-full bg-slate-800" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                <nav className="py-1 max-h-[70vh] overflow-auto">
+                  {NAV_ITEMS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => go(item.id)}
+                      className={`w-full text-left px-4 py-3 hover:bg-brand-soft transition-colors ${view === item.id ? 'bg-brand-soft' : ''}`}
+                    >
+                      <div className={`text-sm font-semibold ${view === item.id ? 'text-brand' : 'text-slate-800'}`}>{item.label}</div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">{item.desc}</div>
+                    </button>
+                  ))}
+                </nav>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-grow">
+        {view === 'landing' && <LandingPage go={go} />}
+        {view === 'surveillance' && <SurveillancePage />}
+        {view === 'login' && (
+          <LoginPage
+            go={go}
+            persistHospital={persistHospital}
+            persistResearcher={persistResearcher}
+            persistAdmin={persistAdmin}
+          />
+        )}
+        {view === 'hospital-register' && <HospitalRegisterPage go={go} />}
+        {view === 'researcher-register' && <ResearcherRegisterPage go={go} />}
+        {view === 'hospital' && (
+          <HospitalPortal
+            go={go}
+            session={hospitalSession}
+            persistSession={persistHospital}
+          />
+        )}
+        {view === 'researcher' && (
+          <ResearcherPortal
+            go={go}
+            session={researcherSession}
+            persistSession={persistResearcher}
+          />
+        )}
+        {view === 'admin' && (
+          <AdminPortal
+            go={go}
+            session={adminSession}
+            persistSession={persistAdmin}
+          />
+        )}
+      </main>
+
+      <footer className="border-t border-slate-200 bg-white py-6 px-4">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between text-xs text-slate-400">
+          <span>PublicHealthMap · Bangladesh critical disease registry</span>
+          <span>© 2026 Ministry of Health and Family Welfare</span>
+        </div>
+      </footer>
+    </div>
+  );
+}
+
+function LandingPage({ go }) {
+  return (
+    <>
+      <section className="relative overflow-hidden border-b border-slate-200">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(15,92,76,0.12),_transparent_55%),linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)]" />
+        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-brand mb-4">People&apos;s Republic of Bangladesh</p>
+          <h1 className="font-display text-4xl sm:text-5xl font-bold text-slate-950 max-w-3xl leading-tight">
+            PublicHealthMap
+          </h1>
+          <p className="mt-5 text-base sm:text-lg text-slate-600 max-w-2xl leading-relaxed">
+            National disease surveillance for Bangladesh&apos;s eight divisions. Hospitals report cases,
+            the public explores filtered disease intelligence by specialty, and approved researchers export anonymized datasets.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <button type="button" onClick={() => go('surveillance')} className="bg-brand hover:bg-brand-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
+              Explore Surveillance
+            </button>
+            <button type="button" onClick={() => go('login')} className="bg-white border border-slate-300 hover:border-brand text-slate-800 text-sm font-semibold px-5 py-2.5 rounded-lg">
+              Sign In
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-14 grid grid-cols-1 md:grid-cols-3 gap-5">
+        {[
+          { title: 'Hospital facilities', body: 'Register your medical center, await MoHFW approval, then log patient cases in batch.', cta: 'Hospital Registration', action: 'hospital-register' },
+          { title: 'Public intelligence', body: 'Choose one or more diseases and divisions. Maps and charts update to your selection only.', cta: 'Open Surveillance', action: 'surveillance' },
+          { title: 'Research access', body: 'Apply as a research organization. After approval, download PL/SQL-masked case extracts.', cta: 'Researcher Sign Up', action: 'researcher-register' }
+        ].map((card) => (
+          <article key={card.title} className="bg-white border border-slate-200 rounded-xl p-6 flex flex-col">
+            <h2 className="font-display text-xl font-bold text-slate-950">{card.title}</h2>
+            <p className="mt-3 text-sm text-slate-500 leading-relaxed flex-grow">{card.body}</p>
+            <button type="button" onClick={() => go(card.action)} className="mt-6 text-sm font-semibold text-brand hover:text-brand-dark text-left">
+              {card.cta} →
+            </button>
+          </article>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function SurveillancePage() {
+  const [allDiseases, setAllDiseases] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedSubcategories, setSelectedSubcategories] = useState([]);
+  const [selectedDiseases, setSelectedDiseases] = useState([]);
+  const [selectedDivisions, setSelectedDivisions] = useState([]);
   const [statsData, setStatsData] = useState([]);
   const [mapData, setMapData] = useState([]);
-  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const loadAnalytics = () => {
-    setLoadingAnalytics(true);
-    setAnalyticsError('');
+  useEffect(() => {
+    fetch('/api/public/catalog')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) setAllDiseases(d.diseases || []);
+      })
+      .catch(() => {});
+  }, []);
+
+  const categoryOptions = useMemo(
+    () => [...new Set(allDiseases.map((d) => d.category).filter(Boolean))].sort(),
+    [allDiseases]
+  );
+
+  const subcategoryOptions = useMemo(() => {
+    const pool = selectedCategories.length
+      ? allDiseases.filter((d) => selectedCategories.includes(d.category))
+      : allDiseases;
+    return [...new Set(pool.map((d) => d.subcategory).filter(Boolean))].sort();
+  }, [allDiseases, selectedCategories]);
+
+  const diseaseOptions = useMemo(() => {
+    return allDiseases.filter((d) => {
+      if (selectedCategories.length && !selectedCategories.includes(d.category)) return false;
+      if (selectedSubcategories.length && !selectedSubcategories.includes(d.subcategory)) return false;
+      return true;
+    });
+  }, [allDiseases, selectedCategories, selectedSubcategories]);
+
+  useEffect(() => {
+    const allowed = new Set(diseaseOptions.map((d) => d.code));
+    setSelectedDiseases((prev) => {
+      const next = prev.filter((c) => allowed.has(c));
+      return next.length === prev.length ? prev : next;
+    });
+    setSelectedSubcategories((prev) => {
+      const next = prev.filter((s) => subcategoryOptions.includes(s));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [diseaseOptions, subcategoryOptions]);
+
+  const load = () => {
+    setLoading(true);
+    setError('');
+    const q = new URLSearchParams();
+    if (selectedDiseases.length) {
+      q.set('diseases', selectedDiseases.join(','));
+        } else {
+      if (selectedCategories.length) q.set('categories', selectedCategories.join(','));
+      if (selectedSubcategories.length) q.set('subcategories', selectedSubcategories.join(','));
+    }
+    if (selectedDivisions.length) q.set('divisions', selectedDivisions.join(','));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+
     Promise.all([
-      fetch('/api/public/stats').then(res => res.json()),
-      fetch('/api/public/map-data').then(res => res.json())
+      fetch(`/api/public/stats${qs}`).then((r) => r.json()),
+      fetch(`/api/public/map-data${qs}`).then((r) => r.json())
     ])
       .then(([statsRes, mapRes]) => {
         if (statsRes.success && mapRes.success) {
           setStatsData(statsRes.stats);
           setMapData(mapRes.mapData);
         } else {
-          setAnalyticsError('Failed to fetch public outbreak statistics.');
+          setError(statsRes.error || mapRes.error || 'Failed to load surveillance data.');
         }
       })
-      .catch((err) => {
-        console.error(err);
-        setAnalyticsError('Error connecting to public analytics endpoints.');
-      })
-      .finally(() => {
-        setLoadingAnalytics(false);
-      });
+      .catch(() => setError('Could not reach surveillance APIs.'))
+      .finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    if (currentView === 'home') {
-      loadAnalytics();
-    }
-  }, [currentView]);
+  useEffect(() => { load(); }, [selectedDiseases, selectedCategories, selectedSubcategories, selectedDivisions]);
 
-  // Load backend hello on mount
-  useEffect(() => {
-    fetch('/api/hello')
-      .then((res) => res.json())
-      .then((data) => setHelloMessage(data.message))
-      .catch((err) => {
-        console.error(err);
-        setHelloMessage('Server offline');
-      });
-  }, []);
+  const totals = useMemo(() => {
+    const totalCases = statsData.reduce((s, r) => s + r.totalCases, 0);
+    const activeCases = statsData.reduce((s, r) => s + r.activeCases, 0);
+    const deaths = statsData.reduce((s, r) => s + r.totalDeaths, 0);
+    return { totalCases, activeCases, deaths };
+  }, [statsData]);
 
-  // Handle local DB check (from homepage)
-  const handleCheckDb = () => {
-    setChecking(true);
-    setDbStatus({ checked: true, success: false, message: 'Checking Database...' });
-    
-    fetch('/api/db-check')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setDbStatus({ success: true, message: 'Database Connected', checked: true });
-        } else {
-          setDbStatus({ success: false, message: 'Connection Failed', checked: true });
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        setDbStatus({ success: false, message: 'Connection Error', checked: true });
-      })
-      .finally(() => {
-        setChecking(false);
-      });
-  };
-
-  // Handle Patient Search
-  const handleSearchPatient = (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-
-    setSearching(true);
-    setSearchError('');
-    setSearchResult(null);
-    setShowRegForm(false);
-    setRegSuccess('');
-
-    fetch(`/api/patients/search?identity=${encodeURIComponent(searchQuery.trim())}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setSearchResult(data);
-          if (!data.found) {
-            // Pre-fill the search value into NID or BCN field based on length (NID is usually 10/13/17 digits)
-            const query = searchQuery.trim();
-            const isNid = query.length >= 10 && !isNaN(query);
-            setFormData({
-              ...formData,
-              nationalId: isNid ? query : '',
-              birthCertNo: !isNid ? query : '',
-              fullName: '',
-              dob: '',
-              gender: 'Male',
-              bloodGroup: 'A+',
-              contactNumber: '',
-              occupation: '',
-              streetAddress: '',
-              city: '',
-              division: '',
-              photoUrl: ''
-            });
-            setShowRegForm(true);
-          }
-        } else {
-          setSearchError(data.error || 'Failed to complete search.');
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        setSearchError('Error communicating with lookup service.');
-      })
-      .finally(() => {
-        setSearching(false);
-      });
-  };
-
-  // Handle Input Changes
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
-  };
-
-  // Handle Patient Registration
-  const handleRegisterPatient = (e) => {
-    e.preventDefault();
-    setRegLoading(true);
-    setRegError('');
-    setRegSuccess('');
-
-    // Quick client-side validations
-    if (!formData.fullName.trim()) {
-      setRegError('Full Name is required.');
-      setRegLoading(false);
-      return;
-    }
-    if (!formData.dob) {
-      setRegError('Date of Birth is required.');
-      setRegLoading(false);
-      return;
-    }
-    if (!formData.nationalId.trim() && !formData.birthCertNo.trim()) {
-      setRegError('Either National ID or Birth Certificate Number must be provided.');
-      setRegLoading(false);
-      return;
-    }
-
-    fetch('/api/patients/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setRegSuccess(`Patient registered successfully! Generated Patient ID: ${data.patientId}`);
-          
-          // Re-search automatically using the newly registered patient's NID/BCN
-          setSearchQuery(formData.nationalId || formData.birthCertNo);
-          setSearchResult({
-            success: true,
-            found: true,
-            patient: {
-              patientId: data.patientId,
-              fullName: formData.fullName,
-              dateOfBirth: formData.dob,
-              gender: formData.gender,
-              bloodGroup: formData.bloodGroup,
-              contactNumber: formData.contactNumber,
-              occupation: formData.occupation,
-              streetAddress: formData.streetAddress,
-              city: formData.city,
-              division: formData.division,
-              photoUrl: formData.photoUrl
-            }
-          });
-          setShowRegForm(false);
-        } else {
-          setRegError(data.error || 'Registration failed.');
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        setRegError('Network error registering patient.');
-      })
-      .finally(() => {
-        setRegLoading(false);
-      });
-  };
-
-  // Add a new row to the batch
-  const handleAddBatchRow = () => {
-    setBatchCases([
-      ...batchCases,
-      {
-        patientId: '',
-        diseaseId: '101',
-        diagnosisDate: new Date().toISOString().split('T')[0],
-        symptomsList: '',
-        severityAtAdmission: 'Mild',
-        diagnosisMethod: 'Clinical',
-        isolationStatus: 'Home Isolation',
-        infectionSource: 'Local Transmission',
-        notes: ''
-      }
-    ]);
-  };
-
-  // Remove a row from the batch
-  const handleRemoveBatchRow = (index) => {
-    if (batchCases.length <= 1) return; // Keep at least one row
-    const newCases = [...batchCases];
-    newCases.splice(index, 1);
-    setBatchCases(newCases);
-  };
-
-  // Change input in a specific batch row
-  const handleBatchInputChange = (index, field, value) => {
-    const newCases = [...batchCases];
-    newCases[index] = { ...newCases[index], [field]: value };
-    setBatchCases(newCases);
-  };
-
-  // Submit the batch of cases
-  const handleBatchSubmit = (e) => {
-    e.preventDefault();
-    setBatchSubmitting(true);
-    setBatchError('');
-    setBatchResult(null);
-
-    // Quick client-side validation
-    const invalidRow = batchCases.findIndex(c => !c.patientId.trim() || isNaN(Number(c.patientId)));
-    if (invalidRow !== -1) {
-      setBatchError(`Row ${invalidRow + 1}: Patient ID is required and must be a number.`);
-      setBatchSubmitting(false);
-      return;
-    }
-
-    if (!batchHospitalId.trim() || isNaN(Number(batchHospitalId))) {
-      setBatchError('Operating Hospital ID is required and must be a number.');
-      setBatchSubmitting(false);
-      return;
-    }
-
-    const payload = {
-      cases: batchCases.map(c => ({
-        ...c,
-        hospitalId: Number(batchHospitalId)
-      }))
-    };
-
-    fetch('/api/cases/batch-submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setBatchResult(data);
-        } else {
-          setBatchError(data.error || 'Failed to submit batch cases.');
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        setBatchError('Network error submitting batch cases.');
-      })
-      .finally(() => {
-        setBatchSubmitting(false);
-      });
-  };
+  const recentIndex = useMemo(() => {
+    const withCases = statsData.filter((r) => (r.totalCases || 0) > 0 || (r.activeCases || 0) > 0);
+    const pool = withCases.length ? withCases : statsData;
+    return [...pool]
+      .sort((a, b) => (b.totalCases || 0) - (a.totalCases || 0) || (b.activeCases || 0) - (a.activeCases || 0))
+      .slice(0, 10);
+  }, [statsData]);
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 flex flex-col font-sans">
-      
-      {/* Navigation Header */}
-      <header className="bg-white border-b border-gray-200 py-4 px-8 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="cursor-pointer" onClick={() => setCurrentView('home')}>
-            <h1 className="text-xl font-bold tracking-tight text-gray-950">PublicHealthMap</h1>
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest mt-0.5 font-mono">Ministry of Health & Welfare</p>
-          </div>
-          
-          <nav className="flex items-center gap-6">
-            <button 
-              onClick={() => setCurrentView('home')}
-              className={`text-xs font-semibold ${currentView === 'home' ? 'text-slate-900' : 'text-gray-400 hover:text-gray-600'}`}
-            >
-              Public Dashboard
-            </button>
-            <button 
-              onClick={() => setCurrentView('hospital')}
-              className={`text-xs font-semibold ${currentView === 'hospital' ? 'text-slate-900' : 'text-gray-400 hover:text-gray-600'}`}
-            >
-              Hospital Portal
-            </button>
-            <span className="text-xs text-gray-300 font-semibold cursor-not-allowed">Research Area</span>
-            
-            {/* Database status widget */}
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-mono font-medium ${
-              !dbStatus.checked
-                ? 'bg-gray-100 border-gray-200 text-gray-500'
-                : dbStatus.success
-                  ? 'bg-green-50 border-green-200 text-green-700'
-                  : 'bg-red-50 border-red-200 text-red-700'
-            }`}>
-              <span className={`w-2 h-2 rounded-full ${
-                !dbStatus.checked
-                  ? 'bg-gray-400'
-                  : dbStatus.success
-                    ? 'bg-green-600 animate-pulse'
-                    : 'bg-red-600'
-              }`}></span>
-              {dbStatus.message}
-            </div>
-          </nav>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <div className="flex-grow">
-        
-        {/* VIEW 1: HOMEPAGE */}
-        {currentView === 'home' && (
-          <>
-            {/* Hero Banner */}
-            <section className="bg-white border-b border-gray-200 py-16 px-8">
-              <div className="max-w-4xl mx-auto text-center">
-                <h2 className="text-3xl font-extrabold text-gray-900 tracking-tight sm:text-4xl">
-                  National Epidemic Surveillance & Mapping Portal
-                </h2>
-                <p className="mt-4 text-base text-gray-500 max-w-2xl mx-auto">
-                  A secure, local Oracle database-driven framework designed to monitor critical disease spread, aggregate division-level outbreak statistics, and provide clinical analytical profiles.
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <div className="mb-8">
+        <h1 className="font-display text-3xl font-bold text-slate-950">Public Surveillance</h1>
+        <p className="mt-2 text-sm text-slate-500 max-w-2xl">
+          Filter by specialty (e.g. Neurology), a more specific group (e.g. Brain Cancer), then individual diseases and divisions.
                 </p>
               </div>
-            </section>
 
-            {/* Modules Grid */}
-            <main className="max-w-6xl mx-auto py-12 px-8 w-full">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                
-                {/* Hospital Intake Card */}
-                <div className="bg-white border border-gray-200 rounded p-6 flex flex-col justify-between">
-                  <div>
-                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 font-mono">Hospital Intake</div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-3">Patient Registry & Intake</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">
-                      Authorized medical centers can search for patient profiles using National IDs or Birth Certificates, and record detailed clinical cases, symptoms, and outcomes.
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => setCurrentView('hospital')}
-                    className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs py-2 px-4 rounded transition-colors text-center"
-                  >
-                    Open Intake Portal
-                  </button>
+      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MultiSelect
+          label="Category / Specialty"
+          options={categoryOptions}
+          selected={selectedCategories}
+          onChange={setSelectedCategories}
+        />
+        <MultiSelect
+          label="Subcategory (e.g. Brain Cancer)"
+          options={subcategoryOptions}
+          selected={selectedSubcategories}
+          onChange={setSelectedSubcategories}
+        />
+        <MultiSelect
+          label="Specific disease(s)"
+          options={diseaseOptions}
+          selected={selectedDiseases}
+          onChange={setSelectedDiseases}
+          getValue={(o) => o.code}
+          getLabel={(o) => `${o.name} · ${o.category}${o.subcategory ? ` / ${o.subcategory}` : ''}`}
+        />
+        <MultiSelect
+          label="Division / Region(s)"
+          options={BD_DIVISIONS}
+          selected={selectedDivisions}
+          onChange={setSelectedDivisions}
+        />
                 </div>
 
-                {/* Dashboard Card */}
-                <div className="bg-white border border-gray-200 rounded p-6 flex flex-col justify-between">
-                  <div>
-                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 font-mono">Public Analytics</div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-3">Geographic Distribution</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed">
-                      Aggregated statistics and infection counts are available to the public. Outbreak maps and trend charts indicate disease vectors sorted by division, city, and date.
-                    </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        {[
+          { label: 'Total cases', value: totals.totalCases },
+          { label: 'Active cases', value: totals.activeCases },
+          { label: 'Deaths', value: totals.deaths }
+        ].map((kpi) => (
+          <div key={kpi.label} className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">{kpi.label}</div>
+            <div className="mt-2 text-3xl font-display font-bold text-slate-950">{loading ? '—' : kpi.value}</div>
                   </div>
-                  <button className="mt-6 w-full bg-slate-950 text-white font-medium text-xs py-2 px-4 rounded cursor-not-allowed opacity-40">
-                    Analytical Dashboard
-                  </button>
+        ))}
                 </div>
 
-                {/* Researcher Area Card */}
-                <div className="bg-white border border-gray-200 rounded p-6 flex flex-col justify-between">
-                  <div>
-                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 font-mono">Research Access</div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-3">Anonymized Export</h3>
-                    <p className="text-sm text-gray-500 leading-relaxed mb-4">
-                      Approved medical and research organizations can request datasets. Data is masked at the database level using PL/SQL hash routines for HIPAA compliance.
-                    </p>
+      {error && <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-mono">{error}</div>}
 
-                    {showResearcherExport && (
-                      <div className="space-y-3 pt-3 border-t border-gray-100">
-                        <div>
-                          <label className="block text-[10px] uppercase font-mono tracking-wider font-bold text-gray-500 mb-1">Filter Disease</label>
-                          <select
-                            value={exportDisease}
-                            onChange={(e) => setExportDisease(e.target.value)}
-                            className="w-full text-xs bg-slate-50 border border-gray-200 rounded p-1.5 font-mono"
-                          >
-                            <option value="">All Diseases</option>
-                            <option value="COVID19">COVID-19 (COVID19)</option>
-                            <option value="CHOLERA">Cholera (CHOLERA)</option>
-                            <option value="DENGUE">Dengue (DENGUE)</option>
-                            <option value="TB">Tuberculosis (TB)</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-mono tracking-wider font-bold text-gray-500 mb-1">Filter Division</label>
-                          <select
-                            value={exportDivision}
-                            onChange={(e) => setExportDivision(e.target.value)}
-                            className="w-full text-xs bg-slate-50 border border-gray-200 rounded p-1.5 font-mono"
-                          >
-                            <option value="">All Divisions</option>
-                            <option value="Dhaka">Dhaka</option>
-                            <option value="Chittagong">Chittagong</option>
-                            <option value="Rajshahi">Rajshahi</option>
-                            <option value="Khulna">Khulna</option>
-                            <option value="Barisal">Barisal</option>
-                            <option value="Sylhet">Sylhet</option>
-                            <option value="Rangpur">Rangpur</option>
-                            <option value="Mymensingh">Mymensingh</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {!showResearcherExport ? (
-                    <button
-                      onClick={() => setShowResearcherExport(true)}
-                      className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs py-2 px-4 rounded transition-colors text-center"
-                    >
-                      Configure Export
-                    </button>
-                  ) : (
-                    <div className="mt-4 space-y-2">
-                      <button
-                        onClick={handleDownloadExport}
-                        className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs py-2 px-4 rounded transition-colors text-center"
-                      >
-                        Download Dataset (.json)
-                      </button>
-                      <button
-                        onClick={() => setShowResearcherExport(false)}
-                        className="w-full bg-white hover:bg-gray-50 border border-gray-200 text-gray-500 font-medium text-[10px] py-1.5 px-4 rounded transition-colors text-center font-mono"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-              </div>
-
-              {/* Analytics Dashboard Panel */}
-              <section className="mt-12 bg-white border border-gray-200 rounded p-6">
-                <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-6">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
-                      Live Epidemic Outbreak Analytics
-                    </h3>
-                    <p className="text-xs text-gray-400 mt-1">Aggregated statistics compiled database-side via cursor aggregates</p>
-                  </div>
-                  <button
-                    onClick={loadAnalytics}
-                    disabled={loadingAnalytics}
-                    className="bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 text-xs font-semibold py-1.5 px-3 rounded transition-colors"
-                  >
-                    {loadingAnalytics ? 'Refreshing...' : 'Refresh Stats'}
-                  </button>
-                </div>
-
-                {analyticsError && (
-                  <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono mb-6">
-                    {analyticsError}
-                  </div>
-                )}
-
-                {loadingAnalytics && (
-                  <div className="text-center py-12 text-xs text-gray-400 font-mono">
-                    Loading live database analytics...
-                  </div>
-                )}
-
-                {!loadingAnalytics && !analyticsError && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                    
-                    {/* Left Column: Geographic Outline Map */}
-                    <div className="flex flex-col gap-4">
-                      <div className="text-xs font-bold text-gray-600 uppercase tracking-wider">Geographic Bubble Map (Bangladesh)</div>
+      {/* Stacked layout: map → pie → case volume (not side-by-side) */}
+      <div className="space-y-8 mb-8">
+        <section>
                       <ProjectedBubbleMap data={mapData} />
-                      <div className="text-[10px] text-gray-400 italic font-mono">Bubbles are projected based on division coordinates; size indicates case volume.</div>
-                    </div>
-
-                    {/* Right Column: Disease Outbreak Bar Chart */}
-                    <div className="flex flex-col gap-4">
-                      <div className="text-xs font-bold text-gray-600 uppercase tracking-wider">Case Volume by Disease</div>
+        </section>
+        <section>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3">Disease share</h3>
+          <SvgPieChart data={statsData} />
+        </section>
+        <section>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3">Case volume by disease</h3>
                       <SvgBarChart data={statsData} />
-                      <div className="text-[10px] text-gray-400 italic font-mono">Total cases registered in system database per disease profile.</div>
+        </section>
                     </div>
 
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Filtered outbreak index</h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">Top 10 rows by case volume</p>
                   </div>
-                )}
-
-                {/* Aggregated Details Table */}
-                {!loadingAnalytics && !analyticsError && statsData.length > 0 && (
-                  <div className="mt-8 overflow-x-auto border-t border-gray-100 pt-6">
-                    <div className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-4">Outbreak Records Index</div>
-                    <table className="w-full text-left border-collapse text-xs">
+          <button type="button" onClick={load} className="text-xs font-semibold text-brand">Refresh</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
                       <thead>
-                        <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase text-[10px]">
-                          <th className="py-2 pr-4">Division</th>
-                          <th className="py-2 px-4">Disease</th>
-                          <th className="py-2 px-4 text-right">Active Cases</th>
-                          <th className="py-2 px-4 text-right">Total Cases</th>
-                          <th className="py-2 px-4 text-right">Total Deaths</th>
-                          <th className="py-2 pl-4 text-right">Last Synchronized</th>
+              <tr className="border-b border-slate-100 text-[10px] uppercase text-slate-400">
+                <th className="px-5 py-3">Division</th>
+                <th className="px-5 py-3">Disease</th>
+                <th className="px-5 py-3 text-right">Active</th>
+                <th className="px-5 py-3 text-right">Total</th>
+                <th className="px-5 py-3 text-right">Deaths</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100 font-mono">
-                        {statsData.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50">
-                            <td className="py-2 pr-4 font-sans font-semibold text-gray-900">{row.division}</td>
-                            <td className="py-2 px-4 text-slate-700">{row.diseaseCode}</td>
-                            <td className="py-2 px-4 text-right font-medium text-red-600">{row.activeCases}</td>
-                            <td className="py-2 px-4 text-right font-medium text-slate-800">{row.totalCases}</td>
-                            <td className="py-2 px-4 text-right font-medium text-gray-700">{row.totalDeaths}</td>
-                            <td className="py-2 pl-4 text-right text-[10px] text-gray-400">
-                              {row.lastUpdated ? new Date(row.lastUpdated).toLocaleString() : 'N/A'}
-                            </td>
+            <tbody className="divide-y divide-slate-50 font-mono">
+              {!loading && recentIndex.length === 0 && (
+                <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-400">No rows for the current filter selection.</td></tr>
+              )}
+              {recentIndex.map((row, idx) => (
+                <tr key={`${row.division}-${row.diseaseCode}-${idx}`} className="hover:bg-slate-50/80">
+                  <td className="px-5 py-3 font-sans font-semibold text-slate-800">{row.division}</td>
+                  <td className="px-5 py-3">{row.diseaseCode}</td>
+                  <td className="px-5 py-3 text-right text-red-600">{row.activeCases}</td>
+                  <td className="px-5 py-3 text-right">{row.totalCases}</td>
+                  <td className="px-5 py-3 text-right">{row.totalDeaths}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                )}
-              </section>
-
-              {/* Database Proof Panel */}
-              <section className="mt-12 bg-white border border-gray-200 rounded p-6">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-gray-100 pb-4 mb-6 gap-4">
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">
-                      Local Database Integration Status
-                    </h3>
-                    <p className="text-xs text-gray-400 mt-1">Verification of local Oracle connectivity pool</p>
-                  </div>
-                  <button
-                    onClick={handleCheckDb}
-                    disabled={checking}
-                    className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-medium text-xs py-2.5 px-4 rounded transition-colors duration-150"
-                  >
-                    {checking ? 'Testing...' : 'Test DB Connection'}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 text-sm font-mono mb-4">
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">Database Type</div>
-                    <div className="text-gray-900 font-semibold">Oracle Database (11g/XE/Local)</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">Driver Mode</div>
-                    <div className="text-gray-900 font-semibold">node-oracledb (Thick Client)</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">Verification Query</div>
-                    <div className="text-blue-700 font-semibold">SELECT 1 FROM DUAL</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-400 mb-1">Server Check</div>
-                    <div className="text-green-700 font-semibold">{helloMessage}</div>
                   </div>
                 </div>
+  );
+}
 
-                {dbStatus.checked && (
-                  <div className={`text-xs p-3 border rounded font-mono ${
-                    dbStatus.success
-                      ? 'bg-green-50 border-green-200 text-green-800'
-                      : 'bg-red-50 border-red-200 text-red-800'
-                  }`}>
-                    <strong>Status:</strong> {dbStatus.success ? 'Success! Local Oracle DB is connected successfully. Query returned 1.' : 'Error! Connection pool lookup failed.'}
-                  </div>
-                )}
-              </section>
-            </main>
-          </>
+function LoginPage({ go, persistHospital, persistResearcher, persistAdmin }) {
+  const [role, setRole] = useState('hospital');
+  const [email, setEmail] = useState('hosp-1001-dhk@health.gov.bd');
+  const [password, setPassword] = useState('hospital123');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (role === 'admin') {
+      setEmail('admin@health.gov.bd');
+      setPassword('admin123');
+    } else if (role === 'hospital') {
+      setEmail('hosp-1001-dhk@health.gov.bd');
+      setPassword('hospital123');
+    } else {
+      setEmail('iedcr@research.org.bd');
+      setPassword('research123');
+    }
+    setError('');
+  }, [role]);
+
+  const submit = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    const path = role === 'admin'
+      ? '/api/auth/admin/login'
+      : role === 'hospital'
+        ? '/api/auth/hospital/login'
+        : '/api/auth/researcher/login';
+
+    fetch(path, {
+      method: 'POST',
+      headers: authHeaders(null),
+      body: JSON.stringify({ email, password })
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.success) {
+          setError(data.error || 'Sign in failed.');
+          return;
+        }
+        if (role === 'admin') {
+          persistAdmin({ token: data.token, admin: data.admin });
+          go('admin');
+        } else if (role === 'hospital') {
+          persistHospital({ token: data.token, hospital: data.hospital });
+          go('hospital');
+        } else {
+          persistResearcher({ token: data.token, organization: data.organization });
+          go('researcher');
+        }
+      })
+      .catch(() => setError('Network error during sign in.'))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <div className="max-w-lg mx-auto px-4 sm:px-6 py-12">
+      <h1 className="font-display text-3xl font-bold text-slate-950">Sign In</h1>
+      <p className="mt-2 text-sm text-slate-500">Choose your role, then authenticate with your credentials.</p>
+
+      <div className="mt-6 grid grid-cols-3 gap-2 p-1 bg-slate-100 rounded-xl">
+        {[
+          { id: 'admin', label: 'Admin' },
+          { id: 'hospital', label: 'Hospital' },
+          { id: 'researcher', label: 'Researcher' }
+        ].map((tab) => (
+              <button
+            key={tab.id}
+            type="button"
+            onClick={() => setRole(tab.id)}
+            className={`text-xs font-bold py-2.5 rounded-lg transition-colors ${
+              role === tab.id ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {tab.label}
+              </button>
+        ))}
+            </div>
+
+      <form onSubmit={submit} className="mt-6 bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+        {error && <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-mono">{error}</div>}
+                      <div>
+          <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">Email</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-mono" />
+                      </div>
+                      <div>
+          <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">Password</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-mono" />
+                      </div>
+        <button type="submit" disabled={loading} className="w-full bg-brand hover:bg-brand-dark disabled:opacity-50 text-white text-sm font-semibold py-2.5 rounded-lg">
+          {loading ? 'Signing in…' : `Sign in as ${role}`}
+        </button>
+        {role === 'hospital' && (
+          <button type="button" onClick={() => go('hospital-register')} className="w-full text-xs font-semibold text-brand">
+            New facility? Register hospital →
+          </button>
         )}
-
-        {/* VIEW 2: HOSPITAL PORTAL (PATIENT INTAKE) */}
-        {currentView === 'hospital' && (
-          <main className="max-w-4xl mx-auto py-12 px-8 w-full">
-            
-            {/* Navigation Header */}
-            <div className="flex items-center gap-4 mb-6 border-b border-gray-200 pb-4">
-              <button 
-                onClick={() => {
-                  setCurrentView('home');
-                  setSearchResult(null);
-                  setSearchQuery('');
-                  setShowRegForm(false);
-                }} 
-                className="text-xs text-gray-500 hover:text-slate-800 font-semibold border border-gray-300 px-3 py-1.5 rounded bg-white hover:bg-gray-50"
-              >
-                ← Back to Home
-              </button>
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Hospital Portal</h2>
-                <p className="text-xs text-gray-400 font-mono mt-0.5">Step 5/6: Patient Lookup and Registration Package Interface</p>
-              </div>
-            </div>
-
-            {/* Sub-Navigation Tabs */}
-            <div className="flex gap-4 mb-6">
-              <button
-                onClick={() => {
-                  setHospitalSubView('search');
-                  setBatchResult(null);
-                  setBatchError('');
-                }}
-                className={`text-xs font-bold px-4 py-2 border rounded transition-all ${
-                  hospitalSubView === 'search'
-                    ? 'bg-slate-900 border-slate-900 text-white'
-                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Search & Intake Portal
-              </button>
-              <button
-                onClick={() => {
-                  setHospitalSubView('batch');
-                  setSearchResult(null);
-                  setSearchQuery('');
-                  setShowRegForm(false);
-                }}
-                className={`text-xs font-bold px-4 py-2 border rounded transition-all ${
-                  hospitalSubView === 'batch'
-                    ? 'bg-slate-900 border-slate-900 text-white'
-                    : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Batch Case Logging
-              </button>
-            </div>
-
-            {/* SUB-VIEW 1: SINGLE PATIENT SEARCH & REGISTRATION */}
-            {hospitalSubView === 'search' && (
-              <>
-                {/* Patient Search Form */}
-                <section className="bg-white border border-gray-200 rounded p-6 mb-8">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-3">Lookup Patient</h3>
-                  <p className="text-xs text-gray-400 mb-4">Search by National ID (NID) or Birth Certificate Number (BCN) before creating a clinical case record.</p>
-                  
-                  <form onSubmit={handleSearchPatient} className="flex gap-4">
-                    <input
-                      type="text"
-                      placeholder="Enter NID or Birth Certificate Number"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="flex-grow border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-slate-800"
-                      required
-                    />
-                    <button
-                      type="submit"
-                      disabled={searching || !searchQuery.trim()}
-                      className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2 px-6 rounded transition-colors"
-                    >
-                      {searching ? 'Searching...' : 'Search Patient'}
-                    </button>
-                  </form>
-
-                  {searchError && (
-                    <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
-                      {searchError}
+        {role === 'researcher' && (
+          <button type="button" onClick={() => go('researcher-register')} className="w-full text-xs font-semibold text-brand">
+            New organization? Apply for access →
+          </button>
+        )}
+      </form>
                     </div>
-                  )}
-                  {regSuccess && (
-                    <div className="mt-4 p-3 bg-green-50 border border-green-200 text-green-800 rounded text-xs font-mono">
-                      {regSuccess}
-                    </div>
-                  )}
-                </section>
+  );
+}
 
-                {/* SEARCH RESULTS DISPLAY */}
-                {searchResult && searchResult.found && (
-                  <section className="bg-white border border-gray-200 rounded p-6 mb-8">
-                    <div className="flex items-start justify-between border-b border-gray-100 pb-3 mb-4">
-                      <div>
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Patient Record Found</h3>
-                        <p className="text-xs text-gray-400 mt-1">Identified from the central database registry</p>
-                      </div>
-                      <span className="bg-green-100 border border-green-200 text-green-800 text-[10px] font-semibold font-mono uppercase px-2 py-0.5 rounded">
-                        Active File
-                      </span>
-                    </div>
+function HospitalRegisterPage({ go }) {
+  const [form, setForm] = useState({
+    licenseNumber: '',
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    streetAddress: '',
+    city: '',
+    division: 'Dhaka',
+    latitude: '23.8103',
+    longitude: '90.4125'
+  });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 text-sm">
-                      <div>
-                        <div className="text-xs text-gray-400">Full Name</div>
-                        <div className="text-gray-900 font-semibold">{searchResult.patient.fullName}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-400">Patient Database ID</div>
-                        <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.patientId}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-400">Date of Birth</div>
-                        <div className="text-gray-900 font-semibold">{searchResult.patient.dateOfBirth}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-400">Gender</div>
-                        <div className="text-gray-900 font-semibold">{searchResult.patient.gender}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-400">Blood Group</div>
-                        <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.bloodGroup}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-400">Contact Number</div>
-                        <div className="text-gray-900 font-semibold font-mono">{searchResult.patient.contactNumber}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-gray-400">Occupation</div>
-                        <div className="text-gray-900 font-semibold">{searchResult.patient.occupation || 'N/A'}</div>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <div className="text-xs text-gray-400">Address</div>
-                        <div className="text-gray-900 font-semibold">
-                          {searchResult.patient.streetAddress ? `${searchResult.patient.streetAddress}, ` : ''}
-                          {searchResult.patient.city}, {searchResult.patient.division}
+  const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const submit = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    fetch('/api/auth/hospital/register', {
+      method: 'POST',
+      headers: authHeaders(null),
+      body: JSON.stringify(form)
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          setSuccess(data.message);
+        } else {
+          setError(data.error || 'Registration failed.');
+        }
+      })
+      .catch(() => setError('Network error.'))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-12">
+      <h1 className="font-display text-3xl font-bold text-slate-950">Hospital Registration</h1>
+      <p className="mt-2 text-sm text-slate-500">Submit your facility for MoHFW admin approval. You cannot sign in until Approved.</p>
+      <form onSubmit={submit} className="mt-6 bg-white border border-slate-200 rounded-xl p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {error && <div className="sm:col-span-2 p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-mono">{error}</div>}
+        {success && <div className="sm:col-span-2 p-3 bg-green-50 border border-green-200 text-green-800 rounded-lg text-xs font-mono">{success}</div>}
+        {[
+          ['licenseNumber', 'License number'],
+          ['name', 'Hospital name'],
+          ['email', 'Official email'],
+          ['password', 'Password', 'password'],
+          ['phone', 'Phone'],
+          ['streetAddress', 'Street address'],
+          ['city', 'City'],
+          ['latitude', 'Latitude'],
+          ['longitude', 'Longitude']
+        ].map(([name, label, type = 'text']) => (
+          <div key={name}>
+            <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">{label}</label>
+            <input name={name} type={type} value={form[name]} onChange={onChange} required={name !== 'streetAddress'} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
                         </div>
-                      </div>
-                    </div>
-
-                    {/* Integration notice */}
-                    <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded text-xs text-gray-500">
-                      <strong>Database verification</strong>: Connection handles are open. Stored procedure package <code>patient_reg_pkg.find_patient</code> executed successfully.
-                    </div>
-                  </section>
-                )}
-
-                {/* PATIENT REGISTRATION FORM (Triggered if not found) */}
-                {showRegForm && (
-                  <section className="bg-white border border-gray-200 rounded p-6">
-                    <div className="border-b border-gray-200 pb-3 mb-6">
-                      <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Register New Patient</h3>
-                      <p className="text-xs text-red-500 mt-1">NJS-Lookup result: Patient identity not registered. You must create a new profile in the database.</p>
-                    </div>
-
-                    {regError && (
-                      <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
-                        {regError}
-                      </div>
-                    )}
-
-                    <form onSubmit={handleRegisterPatient} className="flex flex-col gap-6 text-sm">
-                      
-                      {/* Identity Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        ))}
                         <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">National ID</label>
-                          <input
-                            type="text"
-                            name="nationalId"
-                            value={formData.nationalId}
-                            onChange={handleInputChange}
-                            placeholder="NID Number (if available)"
-                            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Birth Certificate Number</label>
-                          <input
-                            type="text"
-                            name="birthCertNo"
-                            value={formData.birthCertNo}
-                            onChange={handleInputChange}
-                            placeholder="BCN (if available)"
-                            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Core Profile Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="sm:col-span-2">
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Full Name *</label>
-                          <input
-                            type="text"
-                            name="fullName"
-                            value={formData.fullName}
-                            onChange={handleInputChange}
-                            placeholder="Patient Full Name"
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Date of Birth *</label>
-                          <input
-                            type="date"
-                            name="dob"
-                            value={formData.dob}
-                            onChange={handleInputChange}
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm font-mono focus:outline-none"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Gender *</label>
-                          <select
-                            name="gender"
-                            value={formData.gender}
-                            onChange={handleInputChange}
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
-                          >
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                            <option value="Other">Other</option>
+          <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">Division</label>
+          <select name="division" value={form.division} onChange={onChange} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+            {BD_DIVISIONS.map((d) => <option key={d} value={d}>{d}</option>)}
                           </select>
                         </div>
-                      </div>
-
-                      {/* Demographics Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Blood Group *</label>
-                          <select
-                            name="bloodGroup"
-                            value={formData.bloodGroup}
-                            onChange={handleInputChange}
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
-                          >
-                            <option value="A+">A+</option>
-                            <option value="A-">A-</option>
-                            <option value="B+">B+</option>
-                            <option value="B-">B-</option>
-                            <option value="AB+">AB+</option>
-                            <option value="AB-">AB-</option>
-                            <option value="O+">O+</option>
-                            <option value="O-">O-</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Contact Number *</label>
-                          <input
-                            type="text"
-                            name="contactNumber"
-                            value={formData.contactNumber}
-                            onChange={handleInputChange}
-                            placeholder="Mobile or Landline"
-                            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm focus:outline-none focus:border-slate-800"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Occupation</label>
-                          <input
-                            type="text"
-                            name="occupation"
-                            value={formData.occupation}
-                            onChange={handleInputChange}
-                            placeholder="Patient Profession"
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Location Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Street Address</label>
-                          <input
-                            type="text"
-                            name="streetAddress"
-                            value={formData.streetAddress}
-                            onChange={handleInputChange}
-                            placeholder="House / Road Number"
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">City *</label>
-                          <input
-                            type="text"
-                            name="city"
-                            value={formData.city}
-                            onChange={handleInputChange}
-                            placeholder="Town / City"
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-slate-800"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Division *</label>
-                          <input
-                            type="text"
-                            name="division"
-                            value={formData.division}
-                            onChange={handleInputChange}
-                            placeholder="State / Division (e.g. Dhaka)"
-                            className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
-                            required
-                          />
-                        </div>
-                      </div>
-
-                      {/* Submit buttons */}
-                      <div className="flex gap-4 border-t border-gray-100 pt-4 mt-2">
-                        <button
-                          type="submit"
-                          disabled={regLoading}
-                          className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2.5 px-8 rounded transition-colors"
-                        >
-                          {regLoading ? 'Registering...' : 'Register Patient'}
+        <div className="sm:col-span-2 flex gap-3 pt-2">
+          <button type="submit" disabled={loading} className="bg-brand hover:bg-brand-dark disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
+            {loading ? 'Submitting…' : 'Submit registration'}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowRegForm(false)}
-                          className="border border-gray-300 text-gray-600 text-xs font-semibold py-2.5 px-6 rounded bg-white hover:bg-gray-50"
-                        >
-                          Cancel
-                        </button>
+          <button type="button" onClick={() => go('login')} className="text-sm font-semibold text-slate-500">Already registered? Sign in</button>
                       </div>
-
                     </form>
-                  </section>
-                )}
-              </>
-            )}
+    </div>
+  );
+}
 
-            {/* SUB-VIEW 2: BATCH CASE LOGGING */}
-            {hospitalSubView === 'batch' && (
-              <div className="flex flex-col gap-6">
-                
-                {/* Batch Header & Config */}
-                <section className="bg-white border border-gray-200 rounded p-6">
-                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-2">Batch Outbreak Logger</h3>
-                  <p className="text-xs text-gray-400 mb-6 font-sans">Record multiple case files simultaneously inside a single transaction context utilizing PL/SQL Savepoint boundaries.</p>
-                  
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-sm">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Operating Hospital ID *</label>
+function ResearcherRegisterPage({ go }) {
+  const [form, setForm] = useState({
+    registrationNumber: '',
+    name: '',
+    email: '',
+    password: '',
+    purposeStatement: ''
+  });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const submit = (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    fetch('/api/auth/researcher/register', {
+      method: 'POST',
+      headers: authHeaders(null),
+      body: JSON.stringify(form)
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) setSuccess(data.message);
+        else setError(data.error || 'Registration failed.');
+      })
+      .catch(() => setError('Network error.'))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <div className="max-w-xl mx-auto px-4 sm:px-6 py-12">
+      <h1 className="font-display text-3xl font-bold text-slate-950">Researcher Registration</h1>
+      <p className="mt-2 text-sm text-slate-500">Organizations start as Pending until an administrator approves export access.</p>
+      <form onSubmit={submit} className="mt-6 bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+        {error && <div className="p-3 bg-red-50 border border-red-200 text-red-800 rounded-lg text-xs font-mono">{error}</div>}
+        {success && <div className="p-3 bg-green-50 border border-green-200 text-green-800 rounded-lg text-xs font-mono">{success}</div>}
+        {['registrationNumber', 'name', 'email', 'password'].map((name) => (
+          <div key={name}>
+            <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">{name}</label>
                       <input
-                        type="text"
-                        value={batchHospitalId}
-                        onChange={(e) => setBatchHospitalId(e.target.value)}
-                        className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-slate-800"
+              type={name === 'password' ? 'password' : name === 'email' ? 'email' : 'text'}
+              value={form[name]}
+              onChange={(e) => setForm({ ...form, [name]: e.target.value })}
                         required
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                  </div>
-                </section>
-
-                {/* Batch Form Table */}
-                <form onSubmit={handleBatchSubmit} className="bg-white border border-gray-200 rounded p-6 overflow-x-auto">
-                  <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4 min-w-[700px]">
-                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider">Case Registry Records</h3>
-                    <button
-                      type="button"
-                      onClick={handleAddBatchRow}
-                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-1.5 px-3 rounded"
-                    >
-                      + Add Row
-                    </button>
-                  </div>
-
-                  {batchError && (
-                    <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-800 rounded text-xs font-mono">
-                      {batchError}
-                    </div>
-                  )}
-
-                  {batchResult && (
-                    <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded text-xs font-sans">
-                      <div className="font-bold text-gray-800 mb-2">Batch Log Summary (Transaction Complete):</div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-mono mb-4 text-[11px]">
-                        <div>Successfully Written: <span className="text-green-700 font-bold">{batchResult.successCount}</span></div>
-                        <div>Savepoint Rolled Back: <span className="text-red-700 font-bold">{batchResult.failCount}</span></div>
+        ))}
+        <div>
+          <label className="block text-[10px] uppercase tracking-wider font-bold text-slate-500 mb-1">Purpose statement</label>
+          <textarea value={form.purposeStatement} onChange={(e) => setForm({ ...form, purposeStatement: e.target.value })} required className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm min-h-[100px]" />
                       </div>
-                      <div className="border-t border-gray-200 pt-3">
-                        <div className="font-semibold text-gray-700 mb-1">Details per Row:</div>
-                        <ul className="list-disc pl-5 font-mono text-[11px] text-gray-600 flex flex-col gap-1">
-                          {batchResult.results.map((res, i) => (
-                            <li key={i}>
-                              Row {i + 1}: <span className={res.startsWith('SUCCESS') ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>{res}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
-
-                  <table className="w-full text-left border-collapse min-w-[900px] text-xs">
-                    <thead>
-                      <tr className="border-b border-gray-200 text-gray-400 font-bold uppercase tracking-wider text-[10px]">
-                        <th className="py-2 pr-2">Patient ID *</th>
-                        <th className="py-2 px-2">Disease *</th>
-                        <th className="py-2 px-2">Diag Date *</th>
-                        <th className="py-2 px-2">Symptoms List *</th>
-                        <th className="py-2 px-2">Severity</th>
-                        <th className="py-2 px-2">Method</th>
-                        <th className="py-2 px-2">Isolation</th>
-                        <th className="py-2 px-2">Source</th>
-                        <th className="py-2 px-2">Notes</th>
-                        <th className="py-2 pl-2 text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 font-sans">
-                      {batchCases.map((c, idx) => (
-                        <tr key={idx}>
-                          <td className="py-3 pr-2">
-                            <input
-                              type="text"
-                              placeholder="Patient ID"
-                              value={c.patientId}
-                              onChange={(e) => handleBatchInputChange(idx, 'patientId', e.target.value)}
-                              className="w-20 border border-gray-300 rounded px-1.5 py-1 text-xs font-mono focus:outline-none"
-                              required
-                            />
-                          </td>
-                          <td className="py-3 px-2">
-                            <select
-                              value={c.diseaseId}
-                              onChange={(e) => handleBatchInputChange(idx, 'diseaseId', e.target.value)}
-                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
-                            >
-                              <option value="101">COVID-19</option>
-                              <option value="102">Cholera</option>
-                              <option value="103">Dengue</option>
-                              <option value="104">Tuberculosis</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-2">
-                            <input
-                              type="date"
-                              value={c.diagnosisDate}
-                              onChange={(e) => handleBatchInputChange(idx, 'diagnosisDate', e.target.value)}
-                              className="w-28 border border-gray-300 rounded px-1 py-1 font-mono focus:outline-none"
-                              required
-                            />
-                          </td>
-                          <td className="py-3 px-2">
-                            <input
-                              type="text"
-                              placeholder="Symptoms list"
-                              value={c.symptomsList}
-                              onChange={(e) => handleBatchInputChange(idx, 'symptomsList', e.target.value)}
-                              className="w-32 border border-gray-300 rounded px-2 py-1 focus:outline-none"
-                              required
-                            />
-                          </td>
-                          <td className="py-3 px-2">
-                            <select
-                              value={c.severityAtAdmission}
-                              onChange={(e) => handleBatchInputChange(idx, 'severityAtAdmission', e.target.value)}
-                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
-                            >
-                              <option value="Mild">Mild</option>
-                              <option value="Moderate">Moderate</option>
-                              <option value="Severe">Severe</option>
-                              <option value="Critical">Critical</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-2">
-                            <select
-                              value={c.diagnosisMethod}
-                              onChange={(e) => handleBatchInputChange(idx, 'diagnosisMethod', e.target.value)}
-                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
-                            >
-                              <option value="PCR">PCR</option>
-                              <option value="Antigen">Antigen</option>
-                              <option value="Clinical">Clinical</option>
-                              <option value="Culture">Culture</option>
-                              <option value="Imaging">Imaging</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-2">
-                            <select
-                              value={c.isolationStatus}
-                              onChange={(e) => handleBatchInputChange(idx, 'isolationStatus', e.target.value)}
-                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
-                            >
-                              <option value="Home Isolation">Home Isolation</option>
-                              <option value="General Ward">General Ward</option>
-                              <option value="ICU">ICU</option>
-                              <option value="CCU">CCU</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-2">
-                            <select
-                              value={c.infectionSource}
-                              onChange={(e) => handleBatchInputChange(idx, 'infectionSource', e.target.value)}
-                              className="border border-gray-300 rounded px-1 py-1 focus:outline-none"
-                            >
-                              <option value="Local Transmission">Local Transmission</option>
-                              <option value="Imported">Imported</option>
-                              <option value="Unknown">Unknown</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-2">
-                            <input
-                              type="text"
-                              placeholder="Notes"
-                              value={c.notes}
-                              onChange={(e) => handleBatchInputChange(idx, 'notes', e.target.value)}
-                              className="w-24 border border-gray-300 rounded px-1.5 py-1 focus:outline-none"
-                            />
-                          </td>
-                          <td className="py-3 pl-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveBatchRow(idx)}
-                              disabled={batchCases.length <= 1}
-                              className="text-red-500 hover:text-red-700 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed"
-                            >
-                              Remove
+        <div className="flex gap-3">
+          <button type="submit" disabled={loading} className="bg-brand hover:bg-brand-dark disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-lg">
+            {loading ? 'Submitting…' : 'Submit application'}
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  <div className="flex gap-4 border-t border-gray-100 pt-4 mt-6">
-                    <button
-                      type="submit"
-                      disabled={batchSubmitting}
-                      className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white text-xs font-semibold py-2.5 px-8 rounded transition-colors"
-                    >
-                      {batchSubmitting ? 'Logging Batch...' : 'Submit Batch Case Log'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBatchCases([
-                          {
-                            patientId: '',
-                            diseaseId: '101',
-                            diagnosisDate: new Date().toISOString().split('T')[0],
-                            symptomsList: '',
-                            severityAtAdmission: 'Mild',
-                            diagnosisMethod: 'Clinical',
-                            isolationStatus: 'Home Isolation',
-                            infectionSource: 'Local Transmission',
-                            notes: ''
-                          }
-                        ]);
-                        setBatchResult(null);
-                        setBatchError('');
-                      }}
-                      className="border border-gray-300 text-gray-600 text-xs font-semibold py-2.5 px-6 rounded bg-white hover:bg-gray-50"
-                    >
-                      Reset Form
-                    </button>
+          <button type="button" onClick={() => go('login')} className="text-sm font-semibold text-slate-500">Sign in</button>
                   </div>
                 </form>
-              </div>
-            )}
-
-          </main>
-        )}
-
-      </div>
-
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 py-6 px-8 text-center text-xs text-gray-400 mt-12">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <span>PublicHealthMap Project - Database Lab Core Scaffold</span>
-          <span>© 2026 Ministry of Health & Welfare</span>
-        </div>
-      </footer>
-
     </div>
   );
 }

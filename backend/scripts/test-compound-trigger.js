@@ -37,7 +37,7 @@ async function runTest() {
 
     // 3. Ensure we have a test patient.
     console.log('\nInserting test patient...');
-    const patientNid = '9999000011112';
+    const patientNid = '99990000111';
     
     // Clean up patient if they already exist
     await conn.execute(

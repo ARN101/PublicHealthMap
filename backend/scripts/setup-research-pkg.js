@@ -3,8 +3,11 @@ const oracledb = require('oracledb');
 
 const researchSpec = `
 CREATE OR REPLACE PACKAGE research_data_pkg AS
-    -- Procedure to fetch anonymized case records using SYS_REFCURSOR
+    -- Procedure to fetch anonymized case records using SYS_REFCURSOR.
+    -- Enforces organization approval and writes an audit row to DOWNLOAD_LOGS.
+    -- p_disease_code / p_division accept a single value or comma-separated list (NULL = all).
     PROCEDURE get_anonymized_cases(
+        p_org_id       IN  NUMBER,
         p_disease_code IN  VARCHAR2,
         p_division     IN  VARCHAR2,
         p_start_date   IN  VARCHAR2,
@@ -18,23 +21,70 @@ const researchBody = `
 CREATE OR REPLACE PACKAGE BODY research_data_pkg AS
 
     PROCEDURE get_anonymized_cases(
+        p_org_id       IN  NUMBER,
         p_disease_code IN  VARCHAR2,
         p_division     IN  VARCHAR2,
         p_start_date   IN  VARCHAR2,
         p_end_date     IN  VARCHAR2,
         p_cursor       OUT SYS_REFCURSOR
     ) IS
+        v_status       VARCHAR2(20);
+        v_total_rows   NUMBER := 0;
+        v_filter       VARCHAR2(500);
+        v_disease_csv  VARCHAR2(4000);
+        v_division_csv VARCHAR2(4000);
     BEGIN
-        -- Open REF cursor selecting sanitized and masked columns
+        IF p_org_id IS NULL THEN
+            RAISE_APPLICATION_ERROR(-20002, 'Security Warning: Access Denied. Organization ID is required.');
+        END IF;
+
+        BEGIN
+            SELECT approval_status
+            INTO v_status
+            FROM RESEARCH_ORGANIZATIONS
+            WHERE org_id = p_org_id;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE_APPLICATION_ERROR(-20002, 'Security Warning: Access Denied. Organization not found.');
+        END;
+
+        IF v_status != 'Approved' THEN
+            RAISE_APPLICATION_ERROR(-20002, 'Security Warning: Access Denied. Organization registration status: ' || v_status);
+        END IF;
+
+        -- Comma-separated lists (spaces stripped). NULL / empty = all.
+        v_disease_csv  := REPLACE(p_disease_code, ' ', '');
+        v_division_csv := REPLACE(p_division, ' ', '');
+
+        SELECT COUNT(*)
+        INTO v_total_rows
+        FROM CASE_RECORDS cr
+        JOIN PATIENTS pat ON cr.patient_id = pat.patient_id
+        JOIN DISEASES d ON cr.disease_id = d.disease_id
+        WHERE (v_disease_csv IS NULL
+               OR INSTR(',' || v_disease_csv || ',', ',' || d.disease_code || ',') > 0)
+          AND (v_division_csv IS NULL
+               OR INSTR(',' || v_division_csv || ',', ',' || pat.division || ',') > 0)
+          AND (p_start_date IS NULL OR cr.diagnosis_date >= TO_DATE(p_start_date, 'YYYY-MM-DD'))
+          AND (p_end_date IS NULL OR cr.diagnosis_date <= TO_DATE(p_end_date, 'YYYY-MM-DD'));
+
+        v_filter := SUBSTR(
+            'disease=' || NVL(v_disease_csv, 'ALL')
+            || ';division=' || NVL(v_division_csv, 'ALL')
+            || ';start=' || NVL(p_start_date, 'ALL')
+            || ';end=' || NVL(p_end_date, 'ALL'),
+            1, 500
+        );
+
+        INSERT INTO DOWNLOAD_LOGS (org_id, filter_criteria, total_records)
+        VALUES (p_org_id, v_filter, v_total_rows);
+
         OPEN p_cursor FOR
-            SELECT 
-                -- 1. Pseudonymize patient ID using MD5 hash (via DBMS_OBFUSCATION_TOOLKIT to avoid custom DBMS_CRYPTO privileges)
+            SELECT
                 LOWER(RAWTOHEX(DBMS_OBFUSCATION_TOOLKIT.MD5(input_string => TO_CHAR(pat.patient_id)))) AS patient_hash,
-                -- 2. Compute age at diagnosis to omit specific Date of Birth
                 FLOOR(MONTHS_BETWEEN(cr.diagnosis_date, pat.date_of_birth) / 12) AS patient_age,
                 pat.gender,
                 pat.blood_group,
-                -- 3. Return city and division boundaries only, omitting street addresses for HIPAA compliance
                 pat.city,
                 pat.division,
                 d.disease_code,
@@ -42,16 +92,21 @@ CREATE OR REPLACE PACKAGE BODY research_data_pkg AS
                 cr.diagnosis_date,
                 cr.symptoms_list,
                 cr.severity_at_admission,
-                cr.patient_status
+                cr.patient_status,
+                cr.case_id,
+                CASE WHEN cr.affected_part_image_mime IS NOT NULL THEN 'Y' ELSE 'N' END AS has_image,
+                cr.affected_part_image_mime
             FROM CASE_RECORDS cr
             JOIN PATIENTS pat ON cr.patient_id = pat.patient_id
             JOIN DISEASES d ON cr.disease_id = d.disease_id
-            WHERE (p_disease_code IS NULL OR d.disease_code = p_disease_code)
-              AND (p_division IS NULL OR pat.division = p_division)
+            WHERE (v_disease_csv IS NULL
+                   OR INSTR(',' || v_disease_csv || ',', ',' || d.disease_code || ',') > 0)
+              AND (v_division_csv IS NULL
+                   OR INSTR(',' || v_division_csv || ',', ',' || pat.division || ',') > 0)
               AND (p_start_date IS NULL OR cr.diagnosis_date >= TO_DATE(p_start_date, 'YYYY-MM-DD'))
               AND (p_end_date IS NULL OR cr.diagnosis_date <= TO_DATE(p_end_date, 'YYYY-MM-DD'))
             ORDER BY cr.diagnosis_date DESC;
-            
+
     END get_anonymized_cases;
 
 END research_data_pkg;
@@ -62,103 +117,115 @@ async function runSetup() {
     console.log('Connecting to database...');
     await initializeDb();
 
-    // 1. Compile Package Specification
     console.log('\nCompiling PL/SQL Package Specification (RESEARCH_DATA_PKG)...');
     await executeQuery(researchSpec);
     console.log('Package Specification compiled successfully.');
 
-    // 2. Compile Package Body
     console.log('\nCompiling PL/SQL Package Body (RESEARCH_DATA_PKG)...');
     await executeQuery(researchBody);
     console.log('Package Body compiled successfully.');
 
-    // 3. Test REF CURSOR execution in Node.js
-    console.log('\nValidating REF CURSOR and database-level masking...');
+    console.log('\nValidating approval enforcement and DOWNLOAD_LOGS audit...');
     const pool = await initializeDb();
     const conn = await pool.getConnection();
 
     try {
-      console.log('Inserting temporary test records for research data export...');
-      const patientNid = '9999000055555';
-      const hospLicense = 'TEST-RESEARCH-LIC';
+      const pendingReg = 'TEST-PENDING-ORG';
+      const approvedReg = 'TEST-APPROVED-ORG';
 
-      // Clean up previous runs
-      await conn.execute('DELETE FROM CASE_RECORDS WHERE patient_id IN (SELECT patient_id FROM PATIENTS WHERE national_id = :nid)', [patientNid], { autoCommit: true });
-      await conn.execute('DELETE FROM PATIENTS WHERE national_id = :nid', [patientNid], { autoCommit: true });
-      await conn.execute('DELETE FROM HOSPITALS WHERE license_number = :lic', [hospLicense], { autoCommit: true });
+      await conn.execute('DELETE FROM DOWNLOAD_LOGS WHERE org_id IN (SELECT org_id FROM RESEARCH_ORGANIZATIONS WHERE registration_number IN (:a, :b))',
+        { a: pendingReg, b: approvedReg }, { autoCommit: true });
+      await conn.execute('DELETE FROM RESEARCH_ORGANIZATIONS WHERE registration_number IN (:a, :b)',
+        { a: pendingReg, b: approvedReg }, { autoCommit: true });
 
-      // Insert hospital
-      const hospRes = await conn.execute(
-        `INSERT INTO HOSPITALS (license_number, name, email, password_hash, phone, street_address, city, division, latitude, longitude)
-         VALUES (:lic, 'Research Hospital', 'r@hosp.com', 'pwd', '9999', 'Road 5', 'Dhaka', 'Dhaka', 23.8, 90.4)
-         RETURNING hospital_id INTO :hosp_id`,
-        { lic: hospLicense, hosp_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT } }
+      const pendingRes = await conn.execute(
+        `INSERT INTO RESEARCH_ORGANIZATIONS (registration_number, name, email, password_hash, approval_status, purpose_statement)
+         VALUES (:reg, 'Pending Org', 'pending@test.org', 'pwd', 'Pending', 'Test pending access denial')
+         RETURNING org_id INTO :org_id`,
+        { reg: pendingReg, org_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT } },
+        { autoCommit: true }
       );
-      const hospitalId = hospRes.outBinds.hosp_id[0];
+      const pendingOrgId = pendingRes.outBinds.org_id[0];
 
-      // Insert patient (DOB: 1996-05-15)
-      const patRes = await conn.execute(
-        `INSERT INTO PATIENTS (national_id, birth_cert_no, full_name, date_of_birth, gender, blood_group, contact_number, street_address, city, division)
-         VALUES (:nid, NULL, 'Research Subject Patient', TO_DATE('1996-05-15', 'YYYY-MM-DD'), 'Female', 'O-', '017', 'House 5, Rd 2', 'Dhaka', 'Dhaka')
-         RETURNING patient_id INTO :pat_id`,
-        { nid: patientNid, pat_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT } }
+      let denied = false;
+      try {
+        await conn.execute(
+          `BEGIN
+             research_data_pkg.get_anonymized_cases(
+                 p_org_id => :orgId,
+                 p_disease_code => NULL,
+                 p_division => NULL,
+                 p_start_date => NULL,
+                 p_end_date => NULL,
+                 p_cursor => :cursor
+             );
+           END;`,
+          {
+            orgId: pendingOrgId,
+            cursor: { type: oracledb.CURSOR, dir: oracledb.BIND_OUT }
+          }
+        );
+      } catch (err) {
+        if (err.message.includes('ORA-20002')) {
+          denied = true;
+          console.log('Pending org correctly denied (ORA-20002).');
+        } else {
+          throw err;
+        }
+      }
+      if (!denied) {
+        throw new Error('Expected ORA-20002 for pending organization, but call succeeded.');
+      }
+
+      const approvedRes = await conn.execute(
+        `INSERT INTO RESEARCH_ORGANIZATIONS (registration_number, name, email, password_hash, approval_status, purpose_statement)
+         VALUES (:reg, 'Approved Org', 'approved@test.org', 'pwd', 'Approved', 'Test approved export pipeline')
+         RETURNING org_id INTO :org_id`,
+        { reg: approvedReg, org_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT } },
+        { autoCommit: true }
       );
-      const patientId = patRes.outBinds.pat_id[0];
+      const approvedOrgId = approvedRes.outBinds.org_id[0];
 
-      // Log COVID19 Case (101)
-      await conn.execute(
-        `INSERT INTO CASE_RECORDS (patient_id, hospital_id, disease_id, diagnosis_date, symptoms_list, severity_at_admission, diagnosis_method, patient_status, isolation_status, infection_source)
-         VALUES (:patientId, :hospitalId, 101, TO_DATE('2026-06-15', 'YYYY-MM-DD'), 'Fever', 'Mild', 'PCR', 'Active', 'Home Isolation', 'Local Transmission')`,
-        [patientId, hospitalId],
+      const cursorResult = await conn.execute(
+        `BEGIN
+           research_data_pkg.get_anonymized_cases(
+               p_org_id => :orgId,
+               p_disease_code => NULL,
+               p_division => NULL,
+               p_start_date => NULL,
+               p_end_date => NULL,
+               p_cursor => :cursor
+           );
+         END;`,
+        {
+          orgId: approvedOrgId,
+          cursor: { type: oracledb.CURSOR, dir: oracledb.BIND_OUT }
+        },
         { autoCommit: true }
       );
 
-      console.log(`Seeded test data. Patient ID: ${patientId}, Diagnosis: 2026-06-15 (COVID19).`);
-
-      // Call Stored Procedure returning cursor
-      console.log('\nExecuting research_data_pkg.get_anonymized_cases cursor...');
-      const cursorResult = await conn.execute(
-        `BEGIN
-            research_data_pkg.get_anonymized_cases(
-                p_disease_code => NULL,
-                p_division => NULL,
-                p_start_date => NULL,
-                p_end_date => NULL,
-                p_cursor => :cursor
-            );
-         END;`,
-        {
-          cursor: { type: oracledb.CURSOR, dir: oracledb.BIND_OUT }
-        }
-      );
-
       const cursor = cursorResult.outBinds.cursor;
-      console.log('REF CURSOR retrieved. Fetching rows...');
-      
-      const rows = await cursor.getRows(10); // Fetch up to 10 rows
+      const rows = await cursor.getRows(5);
       await cursor.close();
+      console.log(`Approved org export returned ${rows.length} sample row(s).`);
 
-      console.log('\nSanitized Output Rows:');
-      console.log(JSON.stringify(rows, null, 2));
+      const logCheck = await conn.execute(
+        'SELECT total_records, filter_criteria FROM DOWNLOAD_LOGS WHERE org_id = :id ORDER BY log_id DESC FETCH FIRST 1 ROWS ONLY',
+        [approvedOrgId]
+      ).catch(async () => {
+        // Oracle 11g fallback without FETCH FIRST
+        return conn.execute(
+          `SELECT total_records, filter_criteria FROM (
+             SELECT total_records, filter_criteria FROM DOWNLOAD_LOGS WHERE org_id = :id ORDER BY log_id DESC
+           ) WHERE ROWNUM = 1`,
+          [approvedOrgId]
+        );
+      });
+      console.log('DOWNLOAD_LOGS audit row:', logCheck.rows[0]);
 
-      // Quick validation assertion
-      if (rows.length > 0) {
-        const row = rows[0];
-        console.log('\nSecurity & Privacy Check:');
-        console.log(`- Patient ID Hash (MD5): ${row.PATIENT_HASH} (Verified)`);
-        console.log(`- Age at Diagnosis: ${row.PATIENT_AGE} (Calculated: ${row.PATIENT_AGE} years old)`);
-        console.log(`- Location detail: City='${row.CITY}', Division='${row.DIVISION}' (Street address completely omitted) (Verified)`);
-      } else {
-        console.error('No rows retrieved.');
-      }
-
-      // Cleanup
-      console.log('\nCleaning up validation data...');
-      await conn.execute('DELETE FROM CASE_RECORDS WHERE patient_id = :id', [patientId], { autoCommit: true });
-      await conn.execute('DELETE FROM PATIENTS WHERE patient_id = :id', [patientId], { autoCommit: true });
-      await conn.execute('DELETE FROM HOSPITALS WHERE hospital_id = :id', [hospitalId], { autoCommit: true });
-      console.log('Teardown completed successfully.');
-
+      await conn.execute('DELETE FROM DOWNLOAD_LOGS WHERE org_id IN (:a, :b)', { a: pendingOrgId, b: approvedOrgId }, { autoCommit: true });
+      await conn.execute('DELETE FROM RESEARCH_ORGANIZATIONS WHERE org_id IN (:a, :b)', { a: pendingOrgId, b: approvedOrgId }, { autoCommit: true });
+      console.log('Validation cleanup completed.');
     } finally {
       await conn.close();
     }

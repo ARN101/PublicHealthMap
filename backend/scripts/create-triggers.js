@@ -180,8 +180,13 @@ async function runSetup() {
       try {
         // Run INSERT statement without specifying disease_id to let PL/SQL trigger handle it
         await executeQuery(
-          `INSERT INTO DISEASES (disease_code, common_name, scientific_name, severity_level, transmission_mode, description)
-           VALUES (:code, :name, :scientific, :severity, :transmission, :description)`,
+          `INSERT INTO DISEASES (
+             disease_code, common_name, scientific_name, severity_level, transmission_mode,
+             description, category, subcategory, is_active
+           ) VALUES (
+             :code, :name, :scientific, :severity, :transmission, :description,
+             'Infectious', 'General', 'Y'
+           )`,
           [d.code, d.name, d.scientific, d.severity, d.transmission, d.desc],
           { autoCommit: true }
         );
